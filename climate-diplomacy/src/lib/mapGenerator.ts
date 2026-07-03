@@ -15,7 +15,7 @@ import { MAP_COLS, MAP_ROWS } from "../config/constants";
  *   EU:            cols 24-31, rows 6-12   (Western Europe)
  *   Russia:        cols 28-55, rows 2-8    (Northern Eurasia)
  *   Africa:        cols 24-33, rows 14-23  (Sub-Saharan Africa)
- *   OPEC+:         cols 29-37, rows 12-18  (Middle East + N.Africa)
+ *   OPEC+:         cols 28-42, rows 8-18  (Central Asia, Middle East, Pakistan)
  *   India:         cols 37-43, rows 14-20  (South Asia)
  *   China:         cols 42-53, rows 9-17   (East Asia)
  */
@@ -64,15 +64,25 @@ const COUNTRY_REGIONS: CountryRegion[] = [
     mask: (q, r) => {
       if (q < 32 && r > 6) return false;
       if (q > 52 && r > 5) return false;
+
+      // Far east / Mongolia north — land border with China
+      if (q >= 40 && q <= 51 && r >= 7 && r <= 8) return true;
+
       if (q > 42 && r > 7) return false;
+      // Leave southern Central Asia to OPEC+ (Kazakhstan, etc.)
+      if (r >= 8 && q >= 34 && q < 40) return false;
+      if (r >= 7 && q >= 38 && q < 40) return false;
       return true;
     },
   },
   {
     id: "china",
-    minQ: 42, maxQ: 53,
+    minQ: 40, maxQ: 53,
     minR: 9, maxR: 17,
     mask: (q, r) => {
+      // Northern China / Manchuria — land border with Russia
+      if (r >= 9 && r <= 10 && q >= 40 && q <= 51) return true;
+
       if (q < 45 && r > 15) return false;
       if (q > 51 && r < 11) return false;
       if (q > 51 && r > 15) return false;
@@ -84,7 +94,10 @@ const COUNTRY_REGIONS: CountryRegion[] = [
     minQ: 37, maxQ: 43,
     minR: 14, maxR: 20,
     mask: (q, r) => {
-      const midQ = 40;
+      // Indian subcontinent — exclude Pakistan/western border
+      if (q < 39 && r <= 17) return false;
+      if (q < 38 && r >= 18) return false;
+      const midQ = 41;
       const maxDist = 20 - r;
       if (Math.abs(q - midQ) > maxDist * 0.7) return false;
       return true;
@@ -92,12 +105,41 @@ const COUNTRY_REGIONS: CountryRegion[] = [
   },
   {
     id: "opec",
-    minQ: 29, maxQ: 37,
-    minR: 12, maxR: 18,
+    minQ: 28, maxQ: 42,
+    minR: 8, maxR: 18,
     mask: (q, r) => {
-      if (q < 31 && r < 14) return false;
-      if (q > 35 && r > 16) return false;
-      return true;
+      // Kazakhstan & Central Asia (Kazakhstan, Uzbekistan, Turkmenistan)
+      if (r <= 10) {
+        if (q < 33 || q > 38) return false;
+        if (r <= 8 && q < 35) return false;
+        // Eastern corridor reserved for Russia–China border (Mongolia)
+        if (r >= 8 && q >= 37) return false;
+        return true;
+      }
+
+      // Iran, Caucasus approaches, Fertile Crescent (r 11-13)
+      if (r >= 11 && r <= 13) {
+        if (q >= 28 && q <= 36) return true;
+        if (q >= 37 && q <= 40) return true;
+        return false;
+      }
+
+      // Arabian Peninsula, Gulf states, eastern Iran (r 14-16)
+      if (r >= 14 && r <= 16) {
+        if (q >= 28 && q <= 37) return true;
+        // Pakistan
+        if (q >= 36 && q <= 40) return true;
+        return false;
+      }
+
+      // Yemen, Oman, southern Pakistan (r 17-18)
+      if (r >= 17) {
+        if (q >= 30 && q <= 37) return true;
+        if (q >= 37 && q <= 39) return true;
+        return false;
+      }
+
+      return false;
     },
   },
   {
@@ -120,8 +162,8 @@ const COUNTRY_REGIONS: CountryRegion[] = [
     minQ: 24, maxQ: 33,
     minR: 14, maxR: 23,
     mask: (q, r) => {
-      // Avoid OPEC+ overlap
-      if (q >= 29 && r <= 18) return false;
+      // Avoid OPEC+ overlap (Middle East, Central Asia, Pakistan)
+      if (q >= 30 && r >= 10 && r <= 18) return false;
       // Northern Africa wider
       if (r <= 15 && (q < 25 || q > 32)) return false;
       // Narrows in the south
@@ -160,9 +202,8 @@ function assignTerrain(
 
   // No country assigned — decide ocean vs neutral land
   if (countryId === null) {
-    // Eurasian interior: Central Asia, Iran, Pakistan, Turkey, Caucasus
-    // Between Russia (row 2-8), OPEC+ (row 12-18), India (row 14-20), China (row 9-17)
-    const isEurasianInterior = q >= 28 && q <= 45 && r >= 5 && r <= 20;
+    // Eurasian interior gaps (Caucasus, Turkey buffer — not claimed by blocs)
+    const isEurasianGap = q >= 28 && q <= 33 && r >= 9 && r <= 12;
     // Also Southeast Asia / Indonesia region
     const isSEAsia = q >= 45 && q <= 55 && r >= 14 && r <= 22;
     // North Africa / Sahara (between EU and sub-Saharan Africa)
@@ -172,10 +213,10 @@ function assignTerrain(
     // Between USA and Latin America
     const isCentralAm = q >= 5 && q <= 16 && r >= 14 && r <= 17;
 
-    if (isEurasianInterior) {
+    if (isEurasianGap) {
       const v = rand();
-      if (v < 0.7) return v < 0.3 ? "desert" : v < 0.5 ? "mountain" : "land";
-      return "ocean"; // Caspian, Aral, etc.
+      if (v < 0.7) return v < 0.3 ? "mountain" : v < 0.5 ? "land" : "desert";
+      return "ocean";
     }
     if (isNorthAfrica) {
       return rand() < 0.6 ? "desert" : "land";
@@ -218,6 +259,13 @@ function assignTerrain(
       return "land";
 
     case "russia":
+      if (q >= 40 && r >= 7) {
+        // Far east / Mongolia — forest and taiga
+        if (roll < 0.4) return "forest";
+        if (roll < 0.55) return "land";
+        if (roll < 0.7) return "mountain";
+        return roll < 0.85 ? "agricultural" : "arctic";
+      }
       if (r <= 3) return roll < 0.5 ? "arctic" : "forest";
       if (roll < 0.35) return "forest";
       if (roll < 0.45) return "mountain";
@@ -226,6 +274,13 @@ function assignTerrain(
       return roll < 0.85 ? "agricultural" : "coastal";
 
     case "china":
+      if (r <= 10 && q >= 40) {
+        // Northern China — steppe and mountains bordering Russia
+        if (roll < 0.35) return "desert";
+        if (roll < 0.5) return "mountain";
+        if (roll < 0.65) return "land";
+        return "agricultural";
+      }
       if (q >= 51) return roll < 0.5 ? "coastal" : "land";
       if (r <= 11) return roll < 0.3 ? "mountain" : "desert";
       if (roll < 0.25) return "agricultural";
@@ -242,6 +297,21 @@ function assignTerrain(
       return "coastal";
 
     case "opec":
+      if (r <= 10) {
+        // Central Asia steppe/desert
+        if (roll < 0.45) return "desert";
+        if (roll < 0.65) return "land";
+        if (roll < 0.8) return "mountain";
+        return "coastal";
+      }
+      if (q >= 36 && r >= 14) {
+        // Pakistan — mountains and agriculture
+        if (roll < 0.35) return "mountain";
+        if (roll < 0.55) return "agricultural";
+        if (roll < 0.7) return "desert";
+        return "land";
+      }
+      // Middle East core
       if (roll < 0.55) return "desert";
       if (roll < 0.7) return "coastal";
       if (roll < 0.8) return "land";
@@ -272,6 +342,8 @@ function assignTerrain(
 }
 
 function assignResource(
+  q: number,
+  r: number,
   terrain: TerrainType,
   countryId: CountryId | null,
   rand: () => number
@@ -328,6 +400,21 @@ function assignResource(
       return null;
 
     case "opec":
+      if (r <= 10) {
+        // Kazakhstan / Central Asia oil, gas, uranium
+        if (resourceRoll < 0.3) return "oil";
+        if (resourceRoll < 0.55) return "natural_gas";
+        if (resourceRoll < 0.65) return "uranium";
+        if (terrain === "desert") return "solar_potential";
+        return null;
+      }
+      if (q >= 36 && r >= 14) {
+        // Pakistan
+        if (terrain === "agricultural") return "arable";
+        if (resourceRoll < 0.25) return "natural_gas";
+        return null;
+      }
+      // Gulf & Middle East
       if (resourceRoll < 0.45) return "oil";
       if (resourceRoll < 0.65) return "natural_gas";
       if (terrain === "desert") return "solar_potential";
@@ -372,7 +459,7 @@ export function generateMap(seed: number = 42): HexData[] {
     for (let q = 0; q < MAP_COLS; q++) {
       const countryId = assignCountry(q, r);
       const terrain = assignTerrain(q, r, countryId, rand);
-      const resource = assignResource(terrain, countryId, rand);
+      const resource = assignResource(q, r, terrain, countryId, rand);
 
       hexes.push({ q, r, terrain, countryId, resource });
     }

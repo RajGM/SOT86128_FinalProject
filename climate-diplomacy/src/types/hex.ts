@@ -74,7 +74,7 @@ export const COUNTRY_CONFIGS: Record<CountryId, CountryConfig> = {
   },
   opec: {
     id: "opec", name: "OPEC+", color: "#a855f7", borderColor: "#7e22ce",
-    hexCount: 60, centerQ: 33, centerR: 14, radiusQ: 4, radiusR: 3,
+    hexCount: 95, centerQ: 34, centerR: 13, radiusQ: 6, radiusR: 5,
   },
   latam: {
     id: "latam", name: "Latin America", color: "#14b8a6", borderColor: "#0d9488",
