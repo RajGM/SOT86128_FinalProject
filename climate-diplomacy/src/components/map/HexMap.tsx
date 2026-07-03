@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { HexData, CountryId, COUNTRY_CONFIGS } from "../../types/hex";
-import { hexToPixel, getMapDimensions } from "../../lib/hexUtils";
-import { MAP_COLS, MAP_ROWS, HEX_SIZE } from "../../config/constants";
+import { getMapDimensions } from "../../lib/hexUtils";
+import { computeCountryBorders } from "../../lib/countryBorders";
+import { MAP_COLS, MAP_ROWS } from "../../config/constants";
 import { HexTile } from "./HexTile";
 import { CountryLabel } from "./CountryLabel";
 import { MapLegend } from "./MapLegend";
@@ -21,42 +22,7 @@ export function HexMap({ hexes }: HexMapProps) {
   const mapDims = useMemo(() => getMapDimensions(MAP_COLS, MAP_ROWS), []);
   const countryCounts = useMemo(() => countByCountry(hexes), [hexes]);
 
-  // Compute country border segments: thick dark lines between hexes of different countries
-  const borderSegments = useMemo(() => {
-    const lookup = new Map<string, string | null>();
-    for (const h of hexes) {
-      lookup.set(`${h.q},${h.r}`, h.countryId);
-    }
-
-    const segments: { x1: number; y1: number; x2: number; y2: number }[] = [];
-
-    for (const h of hexes) {
-      if (!h.countryId) continue;
-      const { x, y } = hexToPixel(h.q, h.r);
-
-      // 6 neighbor offsets for offset coordinates (even-r / odd-r)
-      const neighbors = h.r % 2 === 0
-        ? [[h.q-1,h.r],[h.q+1,h.r],[h.q-1,h.r-1],[h.q,h.r-1],[h.q-1,h.r+1],[h.q,h.r+1]]
-        : [[h.q-1,h.r],[h.q+1,h.r],[h.q,h.r-1],[h.q+1,h.r-1],[h.q,h.r+1],[h.q+1,h.r+1]];
-
-      for (let i = 0; i < 6; i++) {
-        const [nq, nr] = neighbors[i];
-        const nCountry = lookup.get(`${nq},${nr}`) ?? null;
-        if (nCountry !== h.countryId) {
-          // Edge i of the hex: corner i to corner i+1
-          const a1 = (Math.PI / 180) * (60 * i - 30);
-          const a2 = (Math.PI / 180) * (60 * (i + 1) - 30);
-          segments.push({
-            x1: x + HEX_SIZE * Math.cos(a1),
-            y1: y + HEX_SIZE * Math.sin(a1),
-            x2: x + HEX_SIZE * Math.cos(a2),
-            y2: y + HEX_SIZE * Math.sin(a2),
-          });
-        }
-      }
-    }
-    return segments;
-  }, [hexes]);
+  const countryBorders = useMemo(() => computeCountryBorders(hexes), [hexes]);
 
   // Initial viewbox
   useEffect(() => {
@@ -159,17 +125,21 @@ export function HexMap({ hexes }: HexMapProps) {
           />
         ))}
 
-        {/* Country border lines — thick dark edges between different countries */}
-        {borderSegments.map((seg, i) => (
-          <line
-            key={`b${i}`}
-            x1={seg.x1} y1={seg.y1}
-            x2={seg.x2} y2={seg.y2}
-            stroke="#111"
-            strokeWidth={2.2}
-            strokeLinecap="round"
-          />
-        ))}
+        {/* Continuous country outlines */}
+        {countryBorders.map(({ countryId, paths }) =>
+          paths.map((d, i) => (
+            <path
+              key={`${countryId}-${i}`}
+              d={d}
+              fill="none"
+              stroke="#111"
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              pointerEvents="none"
+            />
+          ))
+        )}
 
         {/* Country labels */}
         {countryIds.map((id) => (

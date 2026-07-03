@@ -34,8 +34,8 @@ function HexTileInner({ hex, selected, onClick }: HexTileProps) {
 
   if (isCountryHex) {
     fillColor = country!.color;
-    strokeColor = country!.borderColor;
-    strokeWidth = 1.2;
+    strokeColor = "none";
+    strokeWidth = 0;
   } else {
     fillColor = TERRAIN_COLORS[hex.terrain];
     strokeColor = hex.terrain === "ocean" ? "#1a365d"
