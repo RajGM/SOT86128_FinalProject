@@ -7,6 +7,7 @@ import {
 } from "../../lib/populationMechanics";
 import { aggregateResources, aggregateDeposits } from "../../lib/gameState";
 import { getTotalWorkforceDemand } from "../../lib/buildEconomics";
+import { FactionSummaryChip } from "./FactionsPanel";
 import {
   COUNTRY_CONFIGS,
   RESOURCE_DEPOSITS,
@@ -142,6 +143,9 @@ export function ResourcesBar() {
                     {cascade === "unrest" && " — population growth halved"}
                     {cascade === "crisis" && " — −5%/cycle population loss, buildings idle"}
                     {cascade === "collapse" && " — riots, −10%/cycle, no construction"}
+                  </div>
+                  <div style={{ marginTop: 4 }}>
+                    <FactionSummaryChip countryId={id} />
                   </div>
                   <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexWrap: "wrap", gap: "4px 10px", color: "rgba(255,255,255,0.6)" }}>
                     {RESOURCE_DEPOSITS.map((dep) => (

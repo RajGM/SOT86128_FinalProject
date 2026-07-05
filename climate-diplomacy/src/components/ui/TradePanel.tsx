@@ -5,9 +5,17 @@ import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
 import type { TradeItem, TradeMode } from "../../types/game";
 import { formatRoutePath } from "../../lib/routeDetection";
 import { getHubsForCountry } from "../../lib/transportHub";
+import {
+  canInitiateTrade,
+  getRelationColor,
+  getRelationLabel,
+  getTradeTransportUnits,
+  RELATION_ALLIED_THRESHOLD,
+  RELATION_TRADE_THRESHOLD,
+} from "../../lib/relationMechanics";
 
 export function TradePanel() {
-  const { gameState, viewCountry, proposeTrade, getRoutePreview, getTransportCapacity } = useGame();
+  const { gameState, viewCountry, proposeTrade, getRoutePreview, getTransportCapacity, cancelTrade } = useGame();
   const [partner, setPartner] = useState<CountryId>("eu");
   const [item, setItem] = useState<TradeItem>("food");
   const [amount, setAmount] = useState(50);
@@ -24,9 +32,18 @@ export function TradePanel() {
   const partnerHubs = getHubsForCountry(partner, Object.values(gameState.tileBuildings));
   const transportNeeded = item !== "hub_upgrade";
   const effectiveAmount = transportNeeded ? amount : 0;
+  const transportUnits = transportNeeded
+    ? getTradeTransportUnits(gameState.regions, viewCountry, partner, amount)
+    : 0;
+  const relScore = gameState.regions[partner].relations[viewCountry] ?? 50;
+  const relBlocked = !canInitiateTrade(gameState.regions, viewCountry, partner);
+  const alliedDiscount =
+    (gameState.regions[viewCountry].relations[partner] ?? 50) >= RELATION_ALLIED_THRESHOLD &&
+    relScore >= RELATION_ALLIED_THRESHOLD;
   const canTrade =
+    !relBlocked &&
     (!transportNeeded || (routePreview && !routePreview.needsTransitApproval)) &&
-    effectiveAmount <= capacity.remaining &&
+    transportUnits <= capacity.remaining &&
     amount > 0;
 
   return (
@@ -52,6 +69,23 @@ export function TradePanel() {
           ))}
         </select>
 
+        <div style={{ fontSize: 11, marginTop: 6 }}>
+          Their view of you:{" "}
+          <span style={{ color: getRelationColor(relScore) }}>
+            {relScore} ({getRelationLabel(relScore)})
+          </span>
+          {relBlocked && (
+            <div style={{ color: "#ef4444", marginTop: 4 }}>
+              Relations below {RELATION_TRADE_THRESHOLD} — proposals auto-rejected
+            </div>
+          )}
+          {alliedDiscount && transportNeeded && (
+            <div style={{ color: "#22c55e", marginTop: 4 }}>
+              Allied — transport cost halved ({transportUnits} units)
+            </div>
+          )}
+        </div>
+
         {transportNeeded && (
           <div style={{ fontSize: 11, marginTop: 8 }}>
             {routePreview ? (
@@ -64,7 +98,7 @@ export function TradePanel() {
                     Transit approval required — check Routes tab
                   </div>
                 )}
-                {effectiveAmount > capacity.remaining && (
+                {transportUnits > capacity.remaining && (
                   <div style={{ color: "#ef4444", marginTop: 4 }}>
                     Insufficient capacity — max {capacity.remaining} units this cycle
                   </div>
@@ -178,6 +212,15 @@ export function TradePanel() {
             {route && ` via ${route.routeType}`}
             {a.tradeMode === "continuous" ? " · continuous" : ""}
             {!a.active && " · HALTED"}
+            {a.from === viewCountry && a.active && a.tradeMode === "continuous" && (
+              <button
+                className="overlay-btn"
+                style={{ fontSize: 10, marginLeft: 8, padding: "2px 6px" }}
+                onClick={() => cancelTrade(a.id)}
+              >
+                Cancel
+              </button>
+            )}
           </div>
         );
       })}

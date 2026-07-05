@@ -28,6 +28,27 @@ import {
   computePerCapitaConsumption,
 } from "./populationMechanics";
 import { HUB_POST_T3_UPGRADE_COST } from "./transportHub";
+import {
+  applyFactionHappinessDelta,
+  applyFactionSatisfactionChanges,
+  countFactionBuildings,
+  computeFactionPercents,
+  createEmptyFactionCycleEvents,
+  createInitialFactionState,
+  detectTemperatureThresholdCrossing,
+  FACTION_MONEY_SURPLUS_THRESHOLD,
+} from "./factionMechanics";
+import {
+  appendGapHistory,
+  computeAllCountryComparisons,
+  isClimateFinanceTransfer,
+  climateFinanceAmount,
+} from "./comparisonMetrics";
+import {
+  applyTransitFeeRelation,
+  getTransitCommissionMultiplier,
+  processCycleRelations,
+} from "./relationMechanics";
 
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
@@ -77,6 +98,8 @@ function createRegionState(id: CountryId): RegionState {
     extractionUnlocks: {},
     breakthroughs: [],
     relations,
+    factions: createInitialFactionState(),
+    carbonTax: 10,
   };
 }
 
@@ -86,7 +109,7 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
     regions[id] = createRegionState(id);
   }
 
-  return {
+  const base: GameState = {
     regions,
     tileBuildings: {},
     tradeAgreements: [],
@@ -102,6 +125,27 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
     globalTemperature: 1.0,
     cycle: 1,
     testingMode: true,
+    cycleStartCo2: Object.fromEntries(
+      ALL_COUNTRIES.map((id) => [id, regions[id].co2])
+    ) as Partial<Record<CountryId, number>>,
+    previousCycleCo2: Object.fromEntries(
+      ALL_COUNTRIES.map((id) => [id, regions[id].co2])
+    ) as Partial<Record<CountryId, number>>,
+    summitVotes: [],
+    climateFinanceGiven: {},
+    gapScoreHistory: {},
+    lastFactionTempThreshold: 0,
+    factionCycleEvents: {},
+    relationEvents: [],
+    tradePartners: {},
+    relationAlerts: [],
+    climateFinanceThisCycle: {},
+  };
+
+  const initialRows = computeAllCountryComparisons(base);
+  return {
+    ...base,
+    gapScoreHistory: appendGapHistory({}, 1, initialRows),
   };
 }
 
@@ -243,6 +287,21 @@ export function co2TemperatureDelta(co2?: number): number {
   return (co2 ?? 0) * 0.001;
 }
 
+export function applyClimateFinanceUpdate(
+  climateFinanceGiven: Partial<Record<CountryId, number>>,
+  from: CountryId,
+  to: CountryId,
+  item: TradeItem,
+  amount: number
+): Partial<Record<CountryId, number>> {
+  if (!isClimateFinanceTransfer(to, item)) return climateFinanceGiven;
+  const delta = climateFinanceAmount(item, amount);
+  return {
+    ...climateFinanceGiven,
+    [from]: (climateFinanceGiven[from] ?? 0) + delta,
+  };
+}
+
 /**
  * Process one cycle per population-mechanics.md:
  * 1. Per-capita consumption
@@ -256,6 +315,7 @@ export function co2TemperatureDelta(co2?: number): number {
  * 9. Temperature update
  * 10. Climate effects — farm yield penalty above +2.0°C
  * 11. Happiness update (CO₂, temperature, shortage)
+ * 11b. Faction happiness modifier (satisfaction + political balance)
  * 12. Population effects (loss, riots)
  * 13. Clamp food/energy floors
  * 14. Advance cycle
@@ -268,11 +328,18 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   let tradeAgreements = [...prev.tradeAgreements];
   let globalTemperature = prev.globalTemperature;
   let cycleCo2 = 0;
+  let lastFactionTempThreshold = prev.lastFactionTempThreshold;
+  const prevTemperature = prev.globalTemperature;
+  let factionCycleEvents = { ...prev.factionCycleEvents };
 
   const hexMap = new Map(hexes.map((h) => [`${h.q},${h.r}`, h]));
 
   // Reset per-cycle transport capacity at start of trade processing
   let transportCapacityUsed: Partial<Record<CountryId, number>> = {};
+  let climateFinanceGiven = { ...prev.climateFinanceGiven };
+  let climateFinanceThisCycle = { ...prev.climateFinanceThisCycle };
+  let relationEvents = [...prev.relationEvents];
+  let relationAlerts = [...prev.relationAlerts];
 
   // 1. Per-capita consumption
   for (const id of ALL_COUNTRIES) {
@@ -383,7 +450,8 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     );
     const tradeValue = trade.item === "money" ? trade.amount : trade.amount * 0.5;
     for (const transit of routeTransits) {
-      const fee = Math.round(tradeValue * (transit.feeAmount / 100));
+      const multiplier = getTransitCommissionMultiplier(regions, transit.transitRegion, transit.payer);
+      const fee = Math.round(tradeValue * (transit.feeAmount / 100) * multiplier);
       const p = regions[transit.payer];
       const t = regions[transit.transitRegion];
       regions = {
@@ -391,6 +459,19 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
         [transit.payer]: { ...p, money: p.money - fee },
         [transit.transitRegion]: { ...t, money: t.money + fee },
       };
+      if (fee > 0) {
+        const feeRel = applyTransitFeeRelation(
+          regions,
+          transit.payer,
+          transit.transitRegion,
+          prev.cycle,
+          relationEvents,
+          relationAlerts
+        );
+        regions = feeRel.regions;
+        relationEvents = feeRel.relationEvents;
+        relationAlerts = feeRel.relationAlerts;
+      }
     }
 
     const fromR = regions[trade.from];
@@ -417,6 +498,20 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
         [trade.from]: transferred.from,
         [trade.to]: transferred.to,
       };
+      climateFinanceGiven = applyClimateFinanceUpdate(
+        climateFinanceGiven,
+        trade.from,
+        trade.to,
+        trade.item,
+        trade.amount
+      );
+      if (isClimateFinanceTransfer(trade.to, trade.item)) {
+        const delta = climateFinanceAmount(trade.item, trade.amount);
+        climateFinanceThisCycle = {
+          ...climateFinanceThisCycle,
+          [trade.from]: (climateFinanceThisCycle[trade.from] ?? 0) + delta,
+        };
+      }
     }
   }
 
@@ -431,6 +526,17 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
         [agreement.payer]: { ...payer, money: payer.money - agreement.feeAmount },
         [agreement.transitRegion]: { ...transit, money: transit.money + agreement.feeAmount },
       };
+      const feeRel = applyTransitFeeRelation(
+        regions,
+        agreement.payer,
+        agreement.transitRegion,
+        prev.cycle,
+        relationEvents,
+        relationAlerts
+      );
+      regions = feeRel.regions;
+      relationEvents = feeRel.relationEvents;
+      relationAlerts = feeRel.relationAlerts;
     } else {
       transitAgreements = transitAgreements.map((a) =>
         a.id === agreement.id ? { ...a, status: "cancelled" as const } : a
@@ -474,10 +580,58 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   }
 
   // 11. Happiness update (uses post-temperature global temp)
+  const happinessBeforeTemp: Partial<Record<CountryId, number>> = {};
+  for (const id of ALL_COUNTRIES) {
+    happinessBeforeTemp[id] = regions[id].happiness;
+  }
+
   for (const id of ALL_COUNTRIES) {
     regions = {
       ...regions,
       [id]: applyHappinessUpdate(regions[id], globalTemperature),
+    };
+  }
+
+  // 11b. Faction satisfaction + happiness modifier
+  const tempCrossing = detectTemperatureThresholdCrossing(
+    prevTemperature,
+    globalTemperature,
+    lastFactionTempThreshold
+  );
+  if (tempCrossing.crossed) {
+    lastFactionTempThreshold = tempCrossing.newLastCrossed;
+  }
+
+  const allBuildings = Object.values(tileBuildings);
+  for (const id of ALL_COUNTRIES) {
+    const profile = REGION_PROFILES[id];
+    const region = regions[id];
+    const counts = countFactionBuildings(allBuildings, id);
+    const percents = computeFactionPercents(profile, counts);
+
+    const startCo2 = prev.cycleStartCo2[id] ?? region.co2;
+    const events = {
+      ...(factionCycleEvents[id] ?? createEmptyFactionCycleEvents()),
+      co2Increased: region.co2 > startCo2,
+      co2Decreased: region.co2 < startCo2,
+      moneySurplus: region.money > FACTION_MONEY_SURPLUS_THRESHOLD,
+      temperatureThresholdCrossed: tempCrossing.crossed,
+    };
+
+    const updatedFactions = applyFactionSatisfactionChanges(region.factions, events);
+    const happiness = applyFactionHappinessDelta(
+      region.happiness,
+      percents,
+      updatedFactions
+    );
+
+    regions = {
+      ...regions,
+      [id]: {
+        ...region,
+        happiness,
+        factions: updatedFactions,
+      },
     };
   }
 
@@ -498,30 +652,36 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     };
   }
 
+  // 12b. Relations update (continuous trade, emissions, transit checks)
+  const relationResult = processCycleRelations({
+    regions,
+    relationEvents,
+    relationAlerts,
+    tradeAgreements,
+    transitAgreements,
+    transportRoutes,
+    climateFinanceThisCycle,
+    summitVotes: prev.summitVotes,
+    cycle: prev.cycle,
+    prevTemperature,
+    nextTemperature: globalTemperature,
+    happinessBeforeTemp,
+    cycleStartCo2: prev.cycleStartCo2,
+    buildings: Object.values(tileBuildings),
+  });
+  regions = relationResult.regions;
+  relationEvents = relationResult.relationEvents;
+  relationAlerts = relationResult.relationAlerts;
+  tradeAgreements = relationResult.tradeAgreements;
+  transitAgreements = relationResult.transitAgreements;
+  transportRoutes = relationResult.transportRoutes;
+
   const worldHappiness = Math.round(
     ALL_COUNTRIES.reduce((sum, id) => sum + regions[id].happiness, 0) / ALL_COUNTRIES.length
   );
 
-  // Auto-disrupt transit on low relations
-  for (const agreement of transitAgreements) {
-    if (agreement.status !== "active") continue;
-    const transitRelations = regions[agreement.transitRegion].relations;
-    const relFrom = transitRelations[agreement.traderFrom] ?? 50;
-    const relTo = transitRelations[agreement.traderTo] ?? 50;
-    if (relFrom < 30 || relTo < 30) {
-      transitAgreements = transitAgreements.map((a) =>
-        a.id === agreement.id ? { ...a, status: "cancelled" as const } : a
-      );
-      transportRoutes = transportRoutes.map((r) =>
-        r.id === agreement.routeId ? { ...r, status: "disrupted" as const } : r
-      );
-      tradeAgreements = tradeAgreements.map((a) =>
-        a.routeId === agreement.routeId ? { ...a, active: false } : a
-      );
-    }
-  }
-
-  return {
+  const nextCycle = prev.cycle + 1;
+  const snapshotState: GameState = {
     ...prev,
     regions,
     tileBuildings,
@@ -531,6 +691,25 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     transportCapacityUsed,
     globalTemperature,
     worldHappiness,
-    cycle: prev.cycle + 1,
+    climateFinanceGiven,
+    climateFinanceThisCycle: {},
+    relationEvents,
+    relationAlerts,
+    cycle: nextCycle,
+  };
+  const comparisonRows = computeAllCountryComparisons(snapshotState);
+  const gapScoreHistory = appendGapHistory(prev.gapScoreHistory, nextCycle, comparisonRows);
+
+  return {
+    ...snapshotState,
+    gapScoreHistory,
+    cycleStartCo2: Object.fromEntries(
+      ALL_COUNTRIES.map((id) => [id, regions[id].co2])
+    ) as Partial<Record<CountryId, number>>,
+    previousCycleCo2: Object.fromEntries(
+      ALL_COUNTRIES.map((id) => [id, regions[id].co2])
+    ) as Partial<Record<CountryId, number>>,
+    lastFactionTempThreshold,
+    factionCycleEvents: {},
   };
 }

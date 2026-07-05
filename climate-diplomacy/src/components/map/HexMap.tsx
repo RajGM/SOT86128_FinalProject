@@ -12,7 +12,9 @@ import { tileKey } from "../../types/game";
 import { ResourcesBar } from "../ui/ResourcesBar";
 import { ActionPanel } from "../ui/ActionPanel";
 import { DashboardModal } from "../ui/DashboardModal";
+import { ComparisonDashboard } from "../ui/ComparisonDashboard";
 import { BuildPanel } from "../ui/BuildPanel";
+import { RelationAlerts } from "../ui/RelationAlerts";
 import { RouteLines } from "./RouteLines";
 import { hexToTileTags } from "../../types/game";
 
@@ -25,6 +27,8 @@ export function HexMap({ hexes }: HexMapProps) {
     gameState,
     selectedHex,
     setSelectedHex,
+    comparisonOpen,
+    setComparisonOpen,
   } = useGame();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -168,8 +172,19 @@ export function HexMap({ hexes }: HexMapProps) {
       <MapLegend countryCounts={countryCounts} />
 
       <ActionPanel />
+      <RelationAlerts />
       <DashboardModal />
+      <ComparisonDashboard />
       <BuildPanel />
+
+      <div className="comparison-fab">
+        <button
+          className={`overlay-btn ${comparisonOpen ? "active" : ""}`}
+          onClick={() => setComparisonOpen(!comparisonOpen)}
+        >
+          Comparison Dashboard
+        </button>
+      </div>
 
       {selectedHex && (
         <div
@@ -246,7 +261,7 @@ export function HexMap({ hexes }: HexMapProps) {
       <div
         style={{
           position: "absolute",
-          bottom: 16,
+          bottom: 56,
           right: 16,
           color: "rgba(255,255,255,0.4)",
           fontSize: 10,

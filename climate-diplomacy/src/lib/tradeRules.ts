@@ -104,3 +104,4 @@ export function getTransitCosts(
 }
 
 export const RELATION_TRANSIT_THRESHOLD = 30;
+export { RELATION_TRADE_THRESHOLD } from "./relationMechanics";

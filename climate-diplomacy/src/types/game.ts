@@ -143,12 +143,44 @@ export interface TransitRequest {
   status: "pending" | "responded";
 }
 
+export interface FactionState {
+  brownSatisfaction: number;
+  greenSatisfaction: number;
+}
+
+export interface FactionPercents {
+  brownPercent: number;
+  greenPercent: number;
+}
+
+/** Per-cycle domestic political events affecting faction satisfaction. */
+export interface FactionCycleEvents {
+  fossilPlantsBuilt: number;
+  greenOrNuclearPlantsBuilt: number;
+  extractorsBuilt: number;
+  industrialComplexesBuilt: number;
+  manufacturingBuilt: number;
+  farmsBuilt: number;
+  carbonTaxIncrease: number;
+  carbonTaxDecrease: number;
+  votedYesEmissionLimits: boolean;
+  votedNoEmissionLimits: boolean;
+  co2Increased: boolean;
+  co2Decreased: boolean;
+  moneySurplus: boolean;
+  temperatureThresholdCrossed: boolean;
+}
+
 export interface RegionProfile {
   id: CountryId;
   mainRichness: string;
   secondaryStrength: string;
   mainWeakness: string;
   agenda: string[];
+  /** Pre-game brown establishment weight (factionsInCountry.md). */
+  legacyBrown: number;
+  /** Pre-game green establishment weight (factionsInCountry.md). */
+  legacyGreen: number;
   startingResources: {
     money: number;
     energy: number;
@@ -175,6 +207,9 @@ export interface RegionState {
   extractionUnlocks: Partial<Record<ResourceDeposit, boolean>>;
   breakthroughs: string[];
   relations: Partial<Record<CountryId, number>>;
+  factions: FactionState;
+  /** Domestic carbon tax rate (0–100); changes affect faction satisfaction. */
+  carbonTax: number;
 }
 
 export interface TradeAgreement {
@@ -244,6 +279,57 @@ export interface PriorityEntry {
   label: string;
 }
 
+export type RelationEventType =
+  | "trade_completed"
+  | "continuous_trade"
+  | "trade_rejected"
+  | "trade_cancelled"
+  | "population_traded"
+  | "hub_upgrade_gifted"
+  | "technology_traded"
+  | "transit_approved"
+  | "transit_denied"
+  | "transit_fee_paid"
+  | "transit_cancelled"
+  | "summit_same_vote"
+  | "summit_opposite_vote"
+  | "top_emitter_damage"
+  | "co2_decreased"
+  | "climate_finance_given"
+  | "climate_finance_defaulted";
+
+export interface RelationEvent {
+  id: string;
+  cycle: number;
+  fromCountry: CountryId;
+  toCountry: CountryId;
+  event: RelationEventType;
+  delta: number;
+  description: string;
+}
+
+export interface RelationAlert {
+  id: string;
+  viewer: CountryId;
+  other: CountryId;
+  threshold: 20 | 30 | 70 | 80;
+  direction: "above" | "below";
+  message: string;
+}
+
+export type SummitVoteChoice = "yes" | "no" | "abstain";
+
+export interface SummitVoteRecord {
+  cycle: number;
+  resolution: string;
+  votes: Partial<Record<CountryId, SummitVoteChoice>>;
+}
+
+export interface GapHistoryPoint {
+  cycle: number;
+  gap: number;
+}
+
 export interface GameState {
   regions: Record<CountryId, RegionState>;
   tileBuildings: Record<string, PlacedBuilding>;
@@ -261,6 +347,28 @@ export interface GameState {
   globalTemperature: number;
   cycle: number;
   testingMode: boolean;
+  /** CO₂ at start of current cycle — used for faction satisfaction deltas. */
+  cycleStartCo2: Partial<Record<CountryId, number>>;
+  /** CO₂ at end of previous cycle — used for comparison dashboard trend metric. */
+  previousCycleCo2: Partial<Record<CountryId, number>>;
+  /** Summit vote history for cooperation scoring. */
+  summitVotes: SummitVoteRecord[];
+  /** Cumulative money + technology sent to developing countries (comparison dashboard). */
+  climateFinanceGiven: Partial<Record<CountryId, number>>;
+  /** Composite gap score per cycle for historical trend chart. */
+  gapScoreHistory: Partial<Record<CountryId, GapHistoryPoint[]>>;
+  /** Highest global temperature threshold already crossed (faction green concern). */
+  lastFactionTempThreshold: number;
+  /** Accumulated faction events this cycle (reset after cycle processing). */
+  factionCycleEvents: Partial<Record<CountryId, FactionCycleEvents>>;
+  /** Full bilateral relations event log. */
+  relationEvents: RelationEvent[];
+  /** Countries with established diplomatic/trade history (permanent). */
+  tradePartners: Partial<Record<CountryId, CountryId[]>>;
+  /** Pending threshold-crossing alerts for UI. */
+  relationAlerts: RelationAlert[];
+  /** Climate finance sent this cycle (for pledge default detection). */
+  climateFinanceThisCycle: Partial<Record<CountryId, number>>;
 }
 
 export interface ResourceTotals {

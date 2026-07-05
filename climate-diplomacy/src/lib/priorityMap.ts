@@ -1,11 +1,15 @@
 import type { CountryId } from "../types/hex";
-import type { GameSuggestion, PriorityEntry, PriorityStatus, RegionState } from "../types/game";
+import type { GameSuggestion, PlacedBuilding, PriorityEntry, PriorityStatus, RegionState } from "../types/game";
 import { REGION_PROFILES } from "../config/regionProfiles";
 import { COUNTRY_CONFIGS } from "../types/hex";
 import {
   computePerCapitaConsumption,
   getHappinessCascade,
 } from "./populationMechanics";
+import {
+  computeFactionPercents,
+  countFactionBuildings,
+} from "./factionMechanics";
 
 function statusFromRatio(value: number, thresholds: [number, number, number]): PriorityStatus {
   if (value >= thresholds[0]) return "green";
@@ -74,7 +78,8 @@ export function computePriorityMap(region: RegionState, id: CountryId): Priority
 
 export function generateSuggestions(
   region: RegionState,
-  id: CountryId
+  id: CountryId,
+  buildings: PlacedBuilding[] = []
 ): GameSuggestion[] {
   const suggestions: GameSuggestion[] = [];
   const profile = REGION_PROFILES[id];
@@ -124,7 +129,43 @@ export function generateSuggestions(
     suggestions.push({
       id: "coal-agenda",
       priority: 5,
-      text: `A planned fuel plant improves energy but lowers happiness because your agenda favors clean transition.`,
+      text: `A planned fuel plant improves energy but angers your green majority — faction satisfaction will drop.`,
+    });
+  }
+
+  const counts = countFactionBuildings(buildings, id);
+  const percents = computeFactionPercents(profile, counts);
+  const { brownSatisfaction, greenSatisfaction } = region.factions;
+
+  if (percents.brownPercent >= 70 && greenSatisfaction < 50) {
+    suggestions.push({
+      id: "brown-lock-in",
+      priority: 2,
+      text: `${Math.round(percents.brownPercent)}% brown electorate with unhappy green minority — fossil builds satisfy brown but deepen long-term unrest.`,
+    });
+  }
+
+  if (percents.greenPercent >= 60 && brownSatisfaction < 40) {
+    suggestions.push({
+      id: "green-majority",
+      priority: 3,
+      text: `Green majority (${Math.round(percents.greenPercent)}%) expects clean investment. Fossil expansion risks domestic backlash.`,
+    });
+  }
+
+  if (Math.abs(percents.brownPercent - 50) <= 5) {
+    suggestions.push({
+      id: "swing-state",
+      priority: 4,
+      text: `Politically balanced (≈50/50). Every infrastructure choice tips domestic politics — neither faction can be ignored.`,
+    });
+  }
+
+  if (region.money > 500 && percents.brownPercent >= 50) {
+    suggestions.push({
+      id: "brown-surplus",
+      priority: 6,
+      text: `Money surplus boosts brown faction satisfaction (+2/cycle). Strong economy favors status-quo fossil interests.`,
     });
   }
 

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
 import type { CountryId, HexData } from "../types/hex";
+import { COUNTRY_CONFIGS } from "../types/hex";
 import type {
   GameState,
   BuildType,
@@ -8,7 +9,28 @@ import type {
   TradeMode,
   TransitFeeModel,
 } from "../types/game";
-import { createInitialGameState, getRegionForHex, co2TemperatureDelta, processCycle, applyTradeTransfer, getHubUpgradeMoneyCost, applyHubUpgradeFromTrade } from "../lib/gameState";
+import {
+  applyClimateFinanceGivenRelation,
+  applyOneSidedRelation,
+  applySummitVoteRelations,
+  applyTradeRelationEffects,
+  applyTransitApprovedRelations,
+  canInitiateTrade,
+  getTradeTransportUnits,
+  markTradePartners,
+  RELATION_EVENT_DELTAS,
+  shouldApplyClimateFinanceRelation,
+} from "../lib/relationMechanics";
+import {
+  createInitialGameState,
+  getRegionForHex,
+  co2TemperatureDelta,
+  processCycle,
+  applyTradeTransfer,
+  getHubUpgradeMoneyCost,
+  applyHubUpgradeFromTrade,
+  applyClimateFinanceUpdate,
+} from "../lib/gameState";
 import {
   createPlacedBuilding,
   getBuildCost,
@@ -37,6 +59,10 @@ import { getCountryTotalCapacity } from "../lib/transportHub";
 import { tileKey } from "../types/game";
 import { BUILD_BY_ID } from "../config/builds";
 import { isConstructionBlocked } from "../lib/populationMechanics";
+import {
+  createEmptyFactionCycleEvents,
+  recordBuildFactionEvent,
+} from "../lib/factionMechanics";
 
 interface GameContextValue {
   hexes: HexData[];
@@ -51,6 +77,8 @@ interface GameContextValue {
   dashboardTab: "technology" | "diplomacy" | "trade" | "routes";
   setDashboardOpen: (open: boolean) => void;
   setDashboardTab: (tab: "technology" | "diplomacy" | "trade" | "routes") => void;
+  comparisonOpen: boolean;
+  setComparisonOpen: (open: boolean) => void;
   buildPanelOpen: boolean;
   setBuildPanelOpen: (open: boolean) => void;
   placeBuild: (type: BuildType, tier: 1 | 2 | 3) => void;
@@ -73,9 +101,13 @@ interface GameContextValue {
     }
   ) => void;
   respondTransitRequest: (requestId: string, feeModel: TransitFeeModel, feeAmount: number, accept: boolean) => void;
-  cancelTransit: (agreementId: string) => void;
+  cancelTransit: (agreementId: string, cancelledBy: CountryId) => void;
+  cancelTrade: (tradeId: string) => void;
   acceptTransitTerms: (agreementId: string) => void;
   advanceCycle: () => void;
+  dismissRelationAlerts: () => void;
+  setCarbonTax: (countryId: CountryId, newRate: number) => void;
+  recordSummitVote: (countryId: CountryId, votedYes: boolean) => void;
   highlightFacilityRoutes: (countryId: CountryId) => void;
   clearHighlightedRoutes: () => void;
 }
@@ -90,6 +122,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
   const [resourcesExpanded, setResourcesExpanded] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [dashboardTab, setDashboardTab] = useState<"technology" | "diplomacy" | "trade" | "routes">("technology");
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [buildPanelOpen, setBuildPanelOpen] = useState(false);
 
   const toggleResourcesExpanded = useCallback(() => {
@@ -134,9 +167,16 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         const cost = getBuildCost(build, tier);
         const techCost = getBuildTechCost(build, tier);
 
+        const prevEvents = prev.factionCycleEvents[regionId] ?? createEmptyFactionCycleEvents();
+        const buildEvents = recordBuildFactionEvent(prevEvents, type);
+
         return {
           ...prev,
           tileBuildings: { ...prev.tileBuildings, [key]: placed },
+          factionCycleEvents: {
+            ...prev.factionCycleEvents,
+            [regionId]: buildEvents,
+          },
           regions: {
             ...prev.regions,
             [regionId]: {
@@ -312,9 +352,36 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         const buildings = Object.values(prev.tileBuildings);
         const capacity = getCountryTotalCapacity(from, buildings);
         const used = prev.transportCapacityUsed[from] ?? 0;
-        const transportUnits = item === "hub_upgrade" ? 0 : amount;
+        const transportUnits = item === "hub_upgrade" ? 0 : getTradeTransportUnits(prev.regions, from, to, amount);
 
         if (transportUnits > 0 && used + transportUnits > capacity) return prev;
+
+        let tradePartners = markTradePartners(prev.tradePartners, from, to);
+        let regions = prev.regions;
+        let relationEvents = [...prev.relationEvents];
+        let relationAlerts = [...prev.relationAlerts];
+
+        if (!canInitiateTrade(regions, from, to)) {
+          const toName = COUNTRY_CONFIGS[to].name;
+          const rejectResult = applyOneSidedRelation(
+            regions,
+            from,
+            to,
+            RELATION_EVENT_DELTAS.trade_rejected,
+            "trade_rejected",
+            prev.cycle,
+            `Trade proposal rejected by ${toName}`,
+            relationEvents,
+            relationAlerts
+          );
+          return {
+            ...prev,
+            tradePartners,
+            regions: rejectResult.regions,
+            relationEvents: rejectResult.relationEvents,
+            relationAlerts: rejectResult.relationAlerts,
+          };
+        }
 
         let route = item === "hub_upgrade"
           ? { id: "hub-upgrade", status: "active" as const, emissionsPerUnit: 0, from: from, to: to, routeType: "land" as const, path: [from, to] }
@@ -363,7 +430,6 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           if (item !== "hub_upgrade" && !transferred) return prev;
 
           let tileBuildings = prev.tileBuildings;
-          let regions = { ...prev.regions };
 
           if (item === "hub_upgrade" && hubUpgrade) {
             const upgraded = applyHubUpgradeFromTrade(tileBuildings, agreement);
@@ -386,13 +452,60 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
             regions = { ...regions, [from]: fromWithCo2, [to]: transferred.to };
           }
 
+          let tradeRel = applyTradeRelationEffects(
+            regions,
+            from,
+            to,
+            item,
+            amount,
+            prev.cycle,
+            relationEvents,
+            relationAlerts
+          );
+          regions = tradeRel.regions;
+          relationEvents = tradeRel.relationEvents;
+          relationAlerts = tradeRel.relationAlerts;
+
+          if (shouldApplyClimateFinanceRelation(to, item)) {
+            const cfRel = applyClimateFinanceGivenRelation(
+              regions,
+              from,
+              to,
+              prev.cycle,
+              relationEvents,
+              relationAlerts
+            );
+            regions = cfRel.regions;
+            relationEvents = cfRel.relationEvents;
+            relationAlerts = cfRel.relationAlerts;
+          }
+
+          let climateFinanceThisCycle = { ...prev.climateFinanceThisCycle };
+          if (shouldApplyClimateFinanceRelation(to, item)) {
+            climateFinanceThisCycle = {
+              ...climateFinanceThisCycle,
+              [from]: (climateFinanceThisCycle[from] ?? 0) + amount,
+            };
+          }
+
           return {
             ...prev,
             tileBuildings,
             transportRoutes,
             transitRequests,
             tradeAgreements: [...prev.tradeAgreements, agreement],
+            tradePartners,
             regions,
+            relationEvents,
+            relationAlerts,
+            climateFinanceGiven: applyClimateFinanceUpdate(
+              prev.climateFinanceGiven,
+              from,
+              to,
+              item,
+              amount
+            ),
+            climateFinanceThisCycle,
             transportCapacityUsed: {
               ...prev.transportCapacityUsed,
               [from]: used + transportUnits,
@@ -401,11 +514,26 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           };
         }
 
+        const startRel = applyTradeRelationEffects(
+          regions,
+          from,
+          to,
+          item,
+          amount,
+          prev.cycle,
+          relationEvents,
+          relationAlerts
+        );
+
         return {
           ...prev,
           transportRoutes,
           transitRequests,
           tradeAgreements: [...prev.tradeAgreements, agreement],
+          tradePartners,
+          regions: startRel.regions,
+          relationEvents: startRel.relationEvents,
+          relationAlerts: startRel.relationAlerts,
         };
       });
     },
@@ -422,7 +550,33 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           r.id === requestId ? { ...r, status: "responded" as const } : r
         );
 
+        let tradePartners = markTradePartners(prev.tradePartners, request.traderFrom, request.traderTo);
+        tradePartners = markTradePartners(tradePartners, request.transitRegion, request.traderFrom);
+        tradePartners = markTradePartners(tradePartners, request.transitRegion, request.traderTo);
+
         if (!accept) {
+          const denierName = COUNTRY_CONFIGS[request.transitRegion].name;
+          let regions = prev.regions;
+          let relationEvents = [...prev.relationEvents];
+          let relationAlerts = [...prev.relationAlerts];
+
+          for (const trader of [request.traderFrom, request.traderTo]) {
+            const result = applyOneSidedRelation(
+              regions,
+              trader,
+              request.transitRegion,
+              RELATION_EVENT_DELTAS.transit_denied,
+              "transit_denied",
+              prev.cycle,
+              `Transit denied by ${denierName}`,
+              relationEvents,
+              relationAlerts
+            );
+            regions = result.regions;
+            relationEvents = result.relationEvents;
+            relationAlerts = result.relationAlerts;
+          }
+
           return {
             ...prev,
             transitRequests: updatedRequests,
@@ -432,6 +586,10 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
             tradeAgreements: prev.tradeAgreements.map((a) =>
               a.routeId === request.routeId ? { ...a, active: false } : a
             ),
+            tradePartners,
+            regions,
+            relationEvents,
+            relationAlerts,
           };
         }
 
@@ -456,11 +614,25 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           );
         }
 
+        const approveRel = applyTransitApprovedRelations(
+          prev.regions,
+          request.transitRegion,
+          request.traderFrom,
+          request.traderTo,
+          prev.cycle,
+          prev.relationEvents,
+          prev.relationAlerts
+        );
+
         return {
           ...prev,
           transitRequests: updatedRequests,
           transitAgreements: [...prev.transitAgreements, agreement],
           transportRoutes,
+          tradePartners,
+          regions: approveRel.regions,
+          relationEvents: approveRel.relationEvents,
+          relationAlerts: approveRel.relationAlerts,
         };
       });
     },
@@ -507,10 +679,34 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
     });
   }, []);
 
-  const cancelTransit = useCallback((agreementId: string) => {
+  const cancelTransit = useCallback((agreementId: string, cancelledBy: CountryId) => {
     setGameState((prev) => {
       const agreement = prev.transitAgreements.find((a) => a.id === agreementId);
       if (!agreement) return prev;
+
+      let regions = prev.regions;
+      let relationEvents = [...prev.relationEvents];
+      let relationAlerts = [...prev.relationAlerts];
+
+      if (cancelledBy === agreement.transitRegion) {
+        const cancellerName = COUNTRY_CONFIGS[agreement.transitRegion].name;
+        for (const trader of [agreement.traderFrom, agreement.traderTo]) {
+          const result = applyOneSidedRelation(
+            regions,
+            trader,
+            agreement.transitRegion,
+            RELATION_EVENT_DELTAS.transit_cancelled,
+            "transit_cancelled",
+            prev.cycle,
+            `Transit cancelled by ${cancellerName}`,
+            relationEvents,
+            relationAlerts
+          );
+          regions = result.regions;
+          relationEvents = result.relationEvents;
+          relationAlerts = result.relationAlerts;
+        }
+      }
 
       return {
         ...prev,
@@ -523,13 +719,134 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         tradeAgreements: prev.tradeAgreements.map((a) =>
           a.routeId === agreement.routeId ? { ...a, active: false } : a
         ),
+        regions,
+        relationEvents,
+        relationAlerts,
       };
     });
+  }, []);
+
+  const cancelTrade = useCallback((tradeId: string) => {
+    setGameState((prev) => {
+      const trade = prev.tradeAgreements.find((t) => t.id === tradeId);
+      if (!trade || !trade.active) return prev;
+
+      const senderName = COUNTRY_CONFIGS[trade.from].name;
+      const cancelResult = applyOneSidedRelation(
+        prev.regions,
+        trade.to,
+        trade.from,
+        RELATION_EVENT_DELTAS.trade_cancelled,
+        "trade_cancelled",
+        prev.cycle,
+        `Trade deal cancelled by ${senderName}`,
+        prev.relationEvents,
+        prev.relationAlerts
+      );
+
+      return {
+        ...prev,
+        tradeAgreements: prev.tradeAgreements.map((t) =>
+          t.id === tradeId ? { ...t, active: false } : t
+        ),
+        regions: cancelResult.regions,
+        relationEvents: cancelResult.relationEvents,
+        relationAlerts: cancelResult.relationAlerts,
+      };
+    });
+  }, []);
+
+  const dismissRelationAlerts = useCallback(() => {
+    setGameState((prev) => ({ ...prev, relationAlerts: [] }));
   }, []);
 
   const advanceCycle = useCallback(() => {
     setGameState((prev) => processCycle(prev, hexes));
   }, [hexes]);
+
+  const setCarbonTax = useCallback((countryId: CountryId, newRate: number) => {
+    setGameState((prev) => {
+      const region = prev.regions[countryId];
+      const clamped = Math.max(0, Math.min(100, newRate));
+      const delta = clamped - region.carbonTax;
+      if (delta === 0) return prev;
+
+      const prevEvents = prev.factionCycleEvents[countryId] ?? createEmptyFactionCycleEvents();
+      const events = {
+        ...prevEvents,
+        carbonTaxIncrease: delta > 0 ? prevEvents.carbonTaxIncrease + delta : prevEvents.carbonTaxIncrease,
+        carbonTaxDecrease: delta < 0 ? prevEvents.carbonTaxDecrease + Math.abs(delta) : prevEvents.carbonTaxDecrease,
+      };
+
+      return {
+        ...prev,
+        regions: {
+          ...prev.regions,
+          [countryId]: { ...region, carbonTax: clamped },
+        },
+        factionCycleEvents: {
+          ...prev.factionCycleEvents,
+          [countryId]: events,
+        },
+      };
+    });
+  }, []);
+
+  const recordSummitVote = useCallback((countryId: CountryId, votedYes: boolean) => {
+    const resolution = "Emission Limits";
+    setGameState((prev) => {
+      const prevEvents = prev.factionCycleEvents[countryId] ?? createEmptyFactionCycleEvents();
+      const events = {
+        ...prevEvents,
+        votedYesEmissionLimits: votedYes || prevEvents.votedYesEmissionLimits,
+        votedNoEmissionLimits: !votedYes || prevEvents.votedNoEmissionLimits,
+      };
+      if (votedYes) {
+        events.votedNoEmissionLimits = false;
+      } else {
+        events.votedYesEmissionLimits = false;
+      }
+
+      const voteChoice = votedYes ? ("yes" as const) : ("no" as const);
+      const summitVotes = [...prev.summitVotes];
+      const existingIndex = summitVotes.findIndex(
+        (v) => v.cycle === prev.cycle && v.resolution === resolution
+      );
+      let record;
+      if (existingIndex >= 0) {
+        record = {
+          ...summitVotes[existingIndex],
+          votes: { ...summitVotes[existingIndex].votes, [countryId]: voteChoice },
+        };
+        summitVotes[existingIndex] = record;
+      } else {
+        record = { cycle: prev.cycle, resolution, votes: { [countryId]: voteChoice } };
+        summitVotes.push(record);
+      }
+
+      const summitRel = applySummitVoteRelations(
+        prev.regions,
+        countryId,
+        voteChoice,
+        record,
+        prev.cycle,
+        prev.relationEvents,
+        prev.relationAlerts
+      );
+
+      return {
+        ...prev,
+        summitVotes,
+        regions: summitRel.regions,
+        relationEvents: summitRel.relationEvents,
+        relationAlerts: summitRel.relationAlerts,
+        factionCycleEvents: {
+          ...prev.factionCycleEvents,
+          [countryId]: events,
+        },
+      };
+    });
+  }, []);
 
   const highlightFacilityRoutes = useCallback((countryId: CountryId) => {
     setGameState((prev) => {
@@ -566,6 +883,8 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         dashboardTab,
         setDashboardOpen,
         setDashboardTab,
+        comparisonOpen,
+        setComparisonOpen,
         buildPanelOpen,
         setBuildPanelOpen,
         placeBuild,
@@ -576,11 +895,15 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         getTransportCapacity,
         proposeTrade,
         advanceCycle,
+        setCarbonTax,
+        recordSummitVote,
         respondTransitRequest,
         cancelTransit,
+        cancelTrade,
         acceptTransitTerms,
         highlightFacilityRoutes,
         clearHighlightedRoutes,
+        dismissRelationAlerts,
       }}
     >
       {children}

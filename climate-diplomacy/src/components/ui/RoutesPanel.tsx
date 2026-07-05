@@ -4,6 +4,7 @@ import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
 import { formatRoutePath } from "../../lib/routeDetection";
 import { getTransitIncome, getTransitCosts } from "../../lib/tradeRules";
 import { getHubCapacity, getHubsForCountry, getCountryMaxHubTier } from "../../lib/transportHub";
+import { RELATION_FRIENDLY_THRESHOLD } from "../../lib/relationMechanics";
 
 export function RoutesPanel() {
   const {
@@ -185,7 +186,14 @@ export function RoutesPanel() {
                 <button className="overlay-btn" style={{ fontSize: 11, marginTop: 4 }} onClick={() => acceptTransitTerms(a.id)}>Accept Terms</button>
               )}
               {a.status === "active" && (
-                <button className="overlay-btn" style={{ fontSize: 11, marginTop: 4, color: "#ef4444" }} onClick={() => cancelTransit(a.id)}>Cancel</button>
+                <button className="overlay-btn" style={{ fontSize: 11, marginTop: 4, color: "#ef4444" }} onClick={() => cancelTransit(a.id, viewCountry)}>Cancel</button>
+              )}
+              {a.status === "active" && a.transitRegion !== viewCountry && a.payer === viewCountry && (
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>
+                  {(gameState.regions[a.transitRegion].relations[viewCountry] ?? 50) >= RELATION_FRIENDLY_THRESHOLD
+                    ? "Friendly transit discount: 50% commission"
+                    : null}
+                </div>
               )}
             </div>
           ))}

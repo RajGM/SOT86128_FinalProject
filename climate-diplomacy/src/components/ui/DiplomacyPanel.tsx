@@ -2,12 +2,19 @@ import { useGame } from "../../context/GameContext";
 import { REGION_PROFILES } from "../../config/regionProfiles";
 import { computePriorityMap, generateSuggestions, PRIORITY_COLORS } from "../../lib/priorityMap";
 import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
+import { FactionsPanel } from "./FactionsPanel";
+import { RelationsMatrix } from "./RelationsMatrix";
+import { getRelationColor, getRelationLabel } from "../../lib/relationMechanics";
 
 export function DiplomacyPanel() {
   const { gameState, viewCountry, setViewCountry } = useGame();
   const profile = REGION_PROFILES[viewCountry];
   const priorities = computePriorityMap(gameState.regions[viewCountry], viewCountry);
-  const suggestions = generateSuggestions(gameState.regions[viewCountry], viewCountry);
+  const suggestions = generateSuggestions(
+    gameState.regions[viewCountry],
+    viewCountry,
+    Object.values(gameState.tileBuildings)
+  );
 
   const countryIds = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
@@ -26,6 +33,8 @@ export function DiplomacyPanel() {
           </button>
         ))}
       </div>
+
+      <RelationsMatrix />
 
       <div className="section-title">Region Identity — {COUNTRY_CONFIGS[viewCountry].name}</div>
       <div className="card">
@@ -52,7 +61,7 @@ export function DiplomacyPanel() {
           </span>
         ))}
         <p style={{ marginTop: 8, color: "rgba(255,255,255,0.6)", fontSize: 11 }}>
-          Builds matching agenda boost happiness; violations create political cost.
+          Builds shift brown/green political balance; faction satisfaction feeds into happiness each cycle.
         </p>
       </div>
 
@@ -66,6 +75,8 @@ export function DiplomacyPanel() {
         ))}
       </div>
 
+      <FactionsPanel />
+
       <div className="section-title">Advisory Suggestions (2–3 per cycle)</div>
       {suggestions.map((s) => (
         <div key={s.id} className="card" style={{ borderLeft: "3px solid #eab308" }}>
@@ -73,7 +84,7 @@ export function DiplomacyPanel() {
         </div>
       ))}
 
-      <div className="section-title">International Relations</div>
+      <div className="section-title">Quick Relations ({COUNTRY_CONFIGS[viewCountry].name} view)</div>
       {countryIds
         .filter((id) => id !== viewCountry)
         .map((id) => {
@@ -81,8 +92,8 @@ export function DiplomacyPanel() {
           return (
             <div key={id} className="card" style={{ display: "flex", justifyContent: "space-between" }}>
               <span>{COUNTRY_CONFIGS[id].name}</span>
-              <span style={{ color: rel >= 60 ? "#22c55e" : rel >= 40 ? "#eab308" : "#ef4444" }}>
-                {rel}/100
+              <span style={{ color: getRelationColor(rel) }}>
+                {rel} — {getRelationLabel(rel)}
               </span>
             </div>
           );
