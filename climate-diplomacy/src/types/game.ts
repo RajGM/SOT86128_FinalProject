@@ -15,15 +15,10 @@ export type BuildType =
   | "nuclear_plant"
   | "industrial_complex"
   | "manufacturing"
-  | "village"
   | "city"
   | "farm"
-  | "airport"
-  | "dock"
-  | "transport_center"
+  | "transport_hub"
   | "extractor";
-
-export type InfraType = "airport" | "dock" | "transport_center";
 
 export type TradeItem =
   | "money"
@@ -34,9 +29,9 @@ export type TradeItem =
   | "rare_earth"
   | "uranium"
   | "technology"
-  | "goods"
   | "transit_permission"
-  | "airspace_permission";
+  | "airspace_permission"
+  | "hub_upgrade";
 
 export type PriorityStatus = "green" | "yellow" | "orange" | "red";
 
@@ -58,7 +53,6 @@ export interface BuildEffects {
   happiness?: number;
   co2?: number;
   technology?: number;
-  goods?: number;
 }
 
 export interface BuildTierCost {
@@ -118,27 +112,11 @@ export interface TransportRoute {
   /** Full path: [from, ...transitRegions, to] */
   path: CountryId[];
   status: RouteStatus;
-  emissionsPerCycle: number;
-  /** Building ID of infrastructure used at origin */
-  fromFacilityId?: string;
-  /** Building ID of infrastructure used at destination */
-  toFacilityId?: string;
+  /** CO₂ per unit of resource moved on this route. */
+  emissionsPerUnit: number;
+  /** Hub used at origin (if any). */
+  fromHubId?: string;
 }
-
-/** Tier-based infrastructure capacity: max routes per facility */
-export const INFRA_CAPACITY: Record<1 | 2 | 3, number> = { 1: 2, 2: 4, 3: 6 };
-/** Tier-based infrastructure upkeep per cycle by facility type */
-export const INFRA_UPKEEP: Record<InfraType, Record<1 | 2 | 3, number>> = {
-  airport: { 1: 20, 2: 35, 3: 50 },
-  dock: { 1: 15, 2: 25, 3: 40 },
-  transport_center: { 1: 10, 2: 18, 3: 28 },
-};
-/** Tier-based emissions per cycle for each infra type */
-export const INFRA_EMISSIONS: Record<InfraType, Record<1 | 2 | 3, number>> = {
-  airport: { 1: 8, 2: 5, 3: 3 },
-  dock: { 1: 5, 2: 3, 3: 2 },
-  transport_center: { 1: 3, 2: 2, 3: 1 },
-};
 
 export interface TransitAgreement {
   id: string;
@@ -179,7 +157,6 @@ export interface RegionProfile {
     happiness: number;
     co2: number;
     technology: number;
-    goods: number;
   };
 }
 
@@ -191,7 +168,6 @@ export interface RegionState {
   happiness: number;
   co2: number;
   technology: number;
-  goods: number;
   /** Tradeable map deposit stocks (initialized from tile counts). */
   deposits: Record<ResourceDeposit, number>;
   researchLevels: Partial<Record<BuildCategory, number>>;
@@ -210,6 +186,14 @@ export interface TradeAgreement {
   routeId: string;
   active: boolean;
   tradeMode: TradeMode;
+  /** Hub upgrade: building to upgrade on receiver's territory. */
+  hubUpgradeBuildingId?: string;
+  /** Hub upgrade: target tier (2 or 3) or omitted for post-T3 level bump. */
+  hubUpgradeToTier?: 2 | 3;
+  /** Hub upgrade: number of post-T3 levels to add. */
+  hubUpgradeExtraLevels?: number;
+  /** Hub upgrade: who pays the upgrade money cost. */
+  hubUpgradePayer?: CountryId;
 }
 
 export interface BreakthroughProposal {
@@ -268,6 +252,8 @@ export interface GameState {
   transitAgreements: TransitAgreement[];
   transitRequests: TransitRequest[];
   highlightedRoutes: string[];
+  /** Transport units consumed this cycle per country (resets each cycle). */
+  transportCapacityUsed: Partial<Record<CountryId, number>>;
   breakthroughProposal: BreakthroughProposal | null;
   combinedProjects: CombinedResearchProject[];
   researchLicenses: ResearchLicense[];
@@ -285,7 +271,6 @@ export interface ResourceTotals {
   happiness: number;
   co2: number;
   technology: number;
-  goods: number;
 }
 
 export function tileKey(q: number, r: number): string {

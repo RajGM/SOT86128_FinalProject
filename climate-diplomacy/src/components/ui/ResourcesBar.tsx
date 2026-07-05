@@ -24,7 +24,6 @@ const RESOURCE_LABELS_LIST: { key: keyof ReturnType<typeof aggregateResources>; 
   { key: "happiness", label: "Happiness", unit: "%" },
   { key: "co2", label: "CO₂" },
   { key: "technology", label: "Technology" },
-  { key: "goods", label: "Goods" },
 ];
 
 export function ResourcesBar() {

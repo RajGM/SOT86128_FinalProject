@@ -1,25 +1,23 @@
 import { useState } from "react";
 import { useGame } from "../../context/GameContext";
 import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
-import { INFRA_CAPACITY } from "../../types/game";
-import { formatRoutePath, type RouteOption } from "../../lib/routeDetection";
+import { formatRoutePath } from "../../lib/routeDetection";
 import { getTransitIncome, getTransitCosts } from "../../lib/tradeRules";
-import { emissionsLabel } from "../../lib/transportEmissions";
+import { getHubCapacity, getHubsForCountry, getCountryMaxHubTier } from "../../lib/transportHub";
 
 export function RoutesPanel() {
   const {
     gameState,
     viewCountry,
-    getRouteOptions,
-    createRoute,
     respondTransitRequest,
     cancelTransit,
     acceptTransitTerms,
+    getRoutePreview,
+    getTransportCapacity,
+    proposeTrade,
   } = useGame();
 
   const [destination, setDestination] = useState<CountryId>("eu");
-  const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
-  const [showOptions, setShowOptions] = useState(false);
   const [transitFeeModel, setTransitFeeModel] = useState<"flat" | "commission">("flat");
   const [transitFeeAmount, setTransitFeeAmount] = useState(10);
 
@@ -27,11 +25,15 @@ export function RoutesPanel() {
     (id) => id !== viewCountry
   );
 
+  const buildings = Object.values(gameState.tileBuildings);
+  const myHubs = getHubsForCountry(viewCountry, buildings);
+  const maxTier = getCountryMaxHubTier(viewCountry, buildings);
+  const capacity = getTransportCapacity(viewCountry);
+  const routePreview = getRoutePreview(viewCountry, destination);
+
   const myRoutes = gameState.transportRoutes.filter(
     (r) => r.from === viewCountry || r.to === viewCountry
   );
-
-  const allRoutes = gameState.transportRoutes;
 
   const incomingRequests = gameState.transitRequests.filter(
     (r) => r.transitRegion === viewCountry && r.status === "pending"
@@ -44,106 +46,70 @@ export function RoutesPanel() {
   const transitIncome = getTransitIncome(gameState.transitAgreements, viewCountry);
   const transitCosts = getTransitCosts(gameState.transitAgreements, viewCountry);
 
-  const handleFindRoutes = () => {
-    const options = getRouteOptions(viewCountry, destination);
-    setRouteOptions(options);
-    setShowOptions(true);
-  };
-
-  const handleCreateRoute = (option: RouteOption) => {
-    createRoute(option);
-    setShowOptions(false);
-    setRouteOptions([]);
-  };
-
-  const myBuildings = Object.values(gameState.tileBuildings).filter(
-    (b) => b.countryId === viewCountry
-  );
-
-  const totalCapacity = (type: "airport" | "dock" | "transport_center") =>
-    myBuildings
-      .filter((b) => b.type === type)
-      .reduce((sum, b) => sum + INFRA_CAPACITY[b.tier], 0);
-
-  const usedCapacity = (type: "airport" | "dock" | "transport_center") => {
-    const routeType = type === "airport" ? "air" : type === "dock" ? "sea" : "land";
-    return myRoutes.filter((r) => r.routeType === routeType && r.status !== "disrupted").length;
-  };
-
   return (
     <div>
-      <div className="section-title">Infrastructure — {COUNTRY_CONFIGS[viewCountry].name}</div>
+      <div className="section-title">Transport — {COUNTRY_CONFIGS[viewCountry].name}</div>
       <div className="card">
         <div style={{ fontSize: 11, lineHeight: 1.8 }}>
-          <div>Airports: {myBuildings.filter((b) => b.type === "airport").length} ({usedCapacity("airport")}/{totalCapacity("airport")} routes)</div>
-          <div>Docks: {myBuildings.filter((b) => b.type === "dock").length} ({usedCapacity("dock")}/{totalCapacity("dock")} routes)</div>
-          <div>Land Transport Centers: {myBuildings.filter((b) => b.type === "transport_center").length} ({usedCapacity("transport_center")}/{totalCapacity("transport_center")} routes)</div>
+          <div>Transport Hubs: {myHubs.length} · Max tier: T{maxTier || "—"}</div>
+          <div>Capacity: {capacity.used}/{capacity.total} units used this cycle</div>
+          {myHubs.map((h) => (
+            <div key={h.id} style={{ color: "rgba(255,255,255,0.7)" }}>
+              T{h.tier} hub ({h.q},{h.r}) — {getHubCapacity(h)} units/cycle
+              {h.extraLevel ? ` · +${h.extraLevel} post-T3` : ""}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="section-title">Create New Route</div>
+      <div className="section-title">Route Preview</div>
       <div className="card">
         <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>Destination</label>
         <select
           value={destination}
-          onChange={(e) => { setDestination(e.target.value as CountryId); setShowOptions(false); }}
+          onChange={(e) => setDestination(e.target.value as CountryId)}
           style={{ width: "100%", padding: 6, background: "#2a2a3e", color: "#fff", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 4 }}
         >
           {countryIds.map((id) => (
             <option key={id} value={id}>{COUNTRY_CONFIGS[id].name}</option>
           ))}
         </select>
-        <button
-          className="overlay-btn primary"
-          style={{ marginTop: 8, width: "100%" }}
-          onClick={handleFindRoutes}
-        >
-          Find Available Routes
-        </button>
 
-        {showOptions && routeOptions.length === 0 && (
+        {routePreview ? (
+          <div style={{ fontSize: 11, marginTop: 8 }}>
+            <div style={{ fontWeight: 600 }}>
+              {routePreview.routeType.toUpperCase()}: {routePreview.label}
+            </div>
+            <div>Path: {formatRoutePath(routePreview.path)}</div>
+            <div>{routePreview.emissionsPerUnit} CO₂ per unit</div>
+            {routePreview.needsTransitApproval && (
+              <div style={{ color: "#eab308", marginTop: 4 }}>
+                Transit approval needed — propose a trade to request transit
+              </div>
+            )}
+          </div>
+        ) : (
           <div style={{ fontSize: 11, color: "#ef4444", marginTop: 8 }}>
-            No routes available. Build matching infrastructure at both regions first.
+            No route — build or upgrade a Transport Hub
           </div>
         )}
 
-        {showOptions && routeOptions.length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginBottom: 4 }}>
-              {routeOptions.length} option{routeOptions.length > 1 ? "s" : ""} found:
-            </div>
-            {routeOptions.map((opt, i) => (
-              <div key={i} className="card" style={{ marginBottom: 4 }}>
-                <div style={{ fontWeight: 600, fontSize: 12 }}>
-                  {opt.routeType.toUpperCase()}: {opt.label}
-                </div>
-                <div style={{ fontSize: 11, marginTop: 2 }}>
-                  Path: {formatRoutePath(opt.path)}
-                </div>
-                <div style={{ fontSize: 11, color: opt.emissionsPerCycle > 5 ? "#f97316" : "#22c55e" }}>
-                  {emissionsLabel(opt.emissionsPerCycle)} ({opt.emissionsPerCycle} CO₂/cycle)
-                </div>
-                {opt.transitRegions.length > 0 && (
-                  <div style={{ fontSize: 11, color: "#eab308", marginTop: 2 }}>
-                    Transit needed: {opt.transitRegions.map((c) => COUNTRY_CONFIGS[c].name).join(", ")}
-                  </div>
-                )}
-                <button
-                  className="overlay-btn"
-                  style={{ marginTop: 4, fontSize: 11 }}
-                  onClick={() => handleCreateRoute(opt)}
-                >
-                  Establish Route
-                </button>
-              </div>
-            ))}
-          </div>
+        {routePreview?.needsTransitApproval && (
+          <button
+            className="overlay-btn"
+            style={{ marginTop: 8, width: "100%", fontSize: 11 }}
+            onClick={() => proposeTrade(viewCountry, destination, "food", 1, "one_time")}
+          >
+            Request Transit (initiate route)
+          </button>
         )}
       </div>
 
-      <div className="section-title">Your Routes ({myRoutes.length})</div>
+      <div className="section-title">Active Routes ({myRoutes.length})</div>
       {myRoutes.length === 0 && (
-        <div className="card" style={{ color: "rgba(255,255,255,0.5)" }}>No routes yet.</div>
+        <div className="card" style={{ color: "rgba(255,255,255,0.5)" }}>
+          Routes are created automatically when you trade.
+        </div>
       )}
       {myRoutes.map((r) => (
         <div key={r.id} className="card" style={{ opacity: r.status === "disrupted" ? 0.5 : 1 }}>
@@ -154,7 +120,7 @@ export function RoutesPanel() {
             <span style={{ color: r.status === "active" ? "#22c55e" : r.status === "pending" ? "#eab308" : "#ef4444" }}>
               {r.status}
             </span>
-            {" · "}{r.emissionsPerCycle} CO₂/cycle
+            {" · "}{r.emissionsPerUnit} CO₂/unit
           </div>
         </div>
       ))}
@@ -225,18 +191,6 @@ export function RoutesPanel() {
           ))}
         </>
       )}
-
-      <div className="section-title">All Routes (Global)</div>
-      {allRoutes.length === 0 && (
-        <div className="card" style={{ color: "rgba(255,255,255,0.5)" }}>No routes exist yet.</div>
-      )}
-      {allRoutes.map((r) => (
-        <div key={r.id} className="card" style={{ opacity: r.status === "disrupted" ? 0.4 : 1 }}>
-          <div style={{ fontSize: 11 }}>
-            {r.routeType.toUpperCase()}: {formatRoutePath(r.path)} · {r.status} · {r.emissionsPerCycle} CO₂
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

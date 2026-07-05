@@ -97,9 +97,9 @@ export function clampResourceFloors(region: RegionState): RegionState {
   };
 }
 
-const POPULATION_BUILD_TYPES = new Set<BuildType>(["village", "city"]);
+const POPULATION_BUILD_TYPES = new Set<BuildType>(["city"]);
 
-/** Halve village/city population yields during unrest (happiness 30–50). */
+/** Halve city population yields during unrest (happiness 30–50). */
 export function applyUnrestPopulationPenalty(
   effects: BuildEffects,
   buildType: BuildType,

@@ -1,6 +1,146 @@
-import type { BuildDefinition } from "../types/game";
+import type { BuildDefinition, BuildType } from "../types/game";
+
+/** Canonical UI order for the Build Panel and build catalogs. */
+export const BUILD_DISPLAY_ORDER: BuildType[] = [
+  "city",
+  "farm",
+  "extractor",
+  "transport_hub",
+  "industrial_complex",
+  "manufacturing",
+  "fossil_plant",
+  "green_plant",
+  "nuclear_plant",
+];
+
+const BUILD_DISPLAY_INDEX = Object.fromEntries(
+  BUILD_DISPLAY_ORDER.map((id, index) => [id, index])
+) as Record<BuildType, number>;
+
+export function compareBuildsByDisplayOrder(a: BuildType, b: BuildType): number {
+  return BUILD_DISPLAY_INDEX[a] - BUILD_DISPLAY_INDEX[b];
+}
 
 export const BUILD_DEFINITIONS: BuildDefinition[] = [
+  // --- Population (1) ---
+  {
+    id: "city",
+    name: "City",
+    category: "population",
+    description: "Fast population and money growth; heavy food and energy demands, happiness cost.",
+    workforce: 10,
+    costByTier: {
+      1: { money: 100 },
+      2: { money: 175 },
+      3: { money: 275 },
+    },
+    effectsByTier: {
+      1: { food: -20, energy: -15, population: 40, money: 15, co2: 5, happiness: -2 },
+      2: { food: -40, energy: -30, population: 80, money: 30, co2: 8, happiness: -3 },
+      3: { food: -65, energy: -50, population: 130, money: 50, co2: 10, happiness: -5 },
+    },
+    consequenceLines: ["Population +++", "Money +", "Heavy food & energy demand", "Happiness −", "Adds per-capita drain each cycle"],
+  },
+  // --- Food (1) ---
+  {
+    id: "farm",
+    name: "Farm",
+    category: "food",
+    description: "Food production on agricultural tiles. Yield drops as global temperature rises.",
+    workforce: 5,
+    costByTier: {
+      1: { money: 40 },
+      2: { money: 70 },
+      3: { money: 110 },
+    },
+    effectsByTier: {
+      1: { food: 30 },
+      2: { food: 55, energy: -3 },
+      3: { food: 85, energy: -8 },
+    },
+    consequenceLines: ["Food +++", "Agricultural tiles only", "−20% yield above +2°C", "−40% yield above +3°C"],
+  },
+  // --- Extraction (1) ---
+  {
+    id: "extractor",
+    name: "Resource Extractor",
+    category: "extraction",
+    description: "Mines fuel, uranium, or rare earth from deposit tiles each cycle.",
+    workforce: 5,
+    costByTier: {
+      1: { money: 70 },
+      2: { money: 125 },
+      3: { money: 195 },
+    },
+    effectsByTier: {
+      1: {},
+      2: {},
+      3: {},
+    },
+    consequenceLines: ["Deposit tile only", "2/4/7 units per cycle by tier", "No research unlock needed"],
+  },
+  // --- Transport (1) ---
+  {
+    id: "transport_hub",
+    name: "Transport Hub",
+    category: "transport",
+    description:
+      "Enables trade by tier: T1 land neighbors, T2 sea (coastal), T3 air anywhere. Capacity stacks across hubs.",
+    workforce: 6,
+    costByTier: {
+      1: { money: 80 },
+      2: { money: 150 },
+      3: { money: 240 },
+    },
+    effectsByTier: {
+      1: { money: -10 },
+      2: { money: -18 },
+      3: { money: -28 },
+    },
+    consequenceLines: [
+      "T1: land neighbors · 20 units/cycle",
+      "T2: +sea routes · 40 units/cycle (coastal tile)",
+      "T3: +air anywhere · 60 units/cycle",
+      "Post-T3: +20 capacity / +50 cost per level",
+    ],
+  },
+  // --- Economy (2) ---
+  {
+    id: "industrial_complex",
+    name: "Industrial Complex",
+    category: "production",
+    description: "Converts energy into money. Energy source defines your carbon footprint.",
+    workforce: 20,
+    costByTier: {
+      1: { money: 100 },
+      2: { money: 175 },
+      3: { money: 270 },
+    },
+    effectsByTier: {
+      1: { energy: -15, money: 35, co2: 8 },
+      2: { energy: -25, money: 65, co2: 12 },
+      3: { energy: -40, money: 95, co2: 15 },
+    },
+    consequenceLines: ["Money ++", "High energy demand", "High workforce (20)"],
+  },
+  {
+    id: "manufacturing",
+    name: "Manufacturing",
+    category: "production",
+    description: "Converts energy into technology — the only domestic tech source in the game.",
+    workforce: 15,
+    costByTier: {
+      1: { money: 120 },
+      2: { money: 210 },
+      3: { money: 320 },
+    },
+    effectsByTier: {
+      1: { energy: -10, money: -5, technology: 5, co2: 5 },
+      2: { energy: -18, money: -8, technology: 8, co2: 8 },
+      3: { energy: -25, money: -10, technology: 12, co2: 8 },
+    },
+    consequenceLines: ["Technology + (only source)", "+50% tech if rare earth stockpile ≥ 1"],
+  },
   // --- Energy (3) ---
   {
     id: "fossil_plant",
@@ -59,175 +199,6 @@ export const BUILD_DEFINITIONS: BuildDefinition[] = [
     },
     consequenceLines: ["Energy +++", "CO₂ zero", "Consumes uranium/cycle", "Happiness penalty (shrinks with tier)"],
   },
-  // --- Economy (2) ---
-  {
-    id: "industrial_complex",
-    name: "Industrial Complex",
-    category: "production",
-    description: "Converts energy into money and goods. Energy source defines your carbon footprint.",
-    workforce: 20,
-    costByTier: {
-      1: { money: 100 },
-      2: { money: 175 },
-      3: { money: 270 },
-    },
-    effectsByTier: {
-      1: { energy: -15, money: 30, goods: 15, co2: 8 },
-      2: { energy: -25, money: 55, goods: 30, co2: 12 },
-      3: { energy: -40, money: 80, goods: 50, co2: 15 },
-    },
-    consequenceLines: ["Money ++", "Goods +", "High energy demand", "High workforce (20)"],
-  },
-  {
-    id: "manufacturing",
-    name: "Manufacturing",
-    category: "production",
-    description: "Produces goods and technology — the only domestic tech source in the game.",
-    workforce: 15,
-    costByTier: {
-      1: { money: 120 },
-      2: { money: 210 },
-      3: { money: 320 },
-    },
-    effectsByTier: {
-      1: { energy: -10, money: -5, goods: 20, technology: 3, co2: 5 },
-      2: { energy: -18, money: -8, goods: 40, technology: 5, co2: 8 },
-      3: { energy: -25, money: -10, goods: 65, technology: 8, co2: 8 },
-    },
-    consequenceLines: ["Goods ++", "Technology + (only source)", "+50% goods if rare earth stockpile ≥ 1"],
-  },
-  // --- Population (2) ---
-  {
-    id: "village",
-    name: "Village",
-    category: "population",
-    description: "Slow, happy population growth; low footprint. Agricultural or land tiles only.",
-    workforce: 3,
-    costByTier: {
-      1: { money: 50 },
-      2: { money: 85 },
-      3: { money: 130 },
-    },
-    demolishCostRatio: 0.15,
-    demolishRefundRatio: 0.45,
-    effectsByTier: {
-      1: { food: -8, population: 15, happiness: 4 },
-      2: { food: -15, population: 30, happiness: 6 },
-      3: { food: -25, population: 50, happiness: 8 },
-    },
-    consequenceLines: ["Population +", "Happiness +", "Slow but stable growth", "Each citizen drains food/energy/money"],
-  },
-  {
-    id: "city",
-    name: "City",
-    category: "population",
-    description: "Fast population and money growth; heavy food and energy demands, happiness cost.",
-    workforce: 10,
-    costByTier: {
-      1: { money: 100 },
-      2: { money: 175 },
-      3: { money: 275 },
-    },
-    effectsByTier: {
-      1: { food: -20, energy: -15, population: 40, money: 15, co2: 5, happiness: -2 },
-      2: { food: -40, energy: -30, population: 80, money: 30, co2: 8, happiness: -3 },
-      3: { food: -65, energy: -50, population: 130, money: 50, co2: 10, happiness: -5 },
-    },
-    consequenceLines: ["Population +++", "Money +", "Heavy food & energy demand", "Happiness −", "Adds per-capita drain each cycle"],
-  },
-  // --- Food (1) ---
-  {
-    id: "farm",
-    name: "Farm",
-    category: "food",
-    description: "Food production on agricultural tiles. Yield drops as global temperature rises.",
-    workforce: 5,
-    costByTier: {
-      1: { money: 40 },
-      2: { money: 70 },
-      3: { money: 110 },
-    },
-    effectsByTier: {
-      1: { food: 30 },
-      2: { food: 55, energy: -3 },
-      3: { food: 85, energy: -8 },
-    },
-    consequenceLines: ["Food +++", "Agricultural tiles only", "−20% yield above +2°C", "−40% yield above +3°C"],
-  },
-  // --- Transport (3) ---
-  {
-    id: "airport",
-    name: "Airport",
-    category: "transport",
-    description: "Enables air trade routes to any country. Highest cost and emissions.",
-    workforce: 8,
-    costByTier: {
-      1: { money: 140 },
-      2: { money: 245 },
-      3: { money: 375 },
-    },
-    effectsByTier: {
-      1: {},
-      2: {},
-      3: {},
-    },
-    consequenceLines: ["Any-to-any routes", "Capacity T1=2, T2=4, T3=6", "Highest route CO₂"],
-  },
-  {
-    id: "dock",
-    name: "Dock/Port",
-    category: "transport",
-    description: "Enables sea trade routes. Requires coastal tile.",
-    workforce: 6,
-    costByTier: {
-      1: { money: 100 },
-      2: { money: 175 },
-      3: { money: 270 },
-    },
-    effectsByTier: {
-      1: {},
-      2: {},
-      3: {},
-    },
-    consequenceLines: ["Sea routes", "Coastal tiles only", "Moderate route CO₂"],
-  },
-  {
-    id: "transport_center",
-    name: "Land Transport Center",
-    category: "transport",
-    description: "Enables land/border trade routes. Cheapest and cleanest transport.",
-    workforce: 5,
-    costByTier: {
-      1: { money: 80 },
-      2: { money: 140 },
-      3: { money: 215 },
-    },
-    effectsByTier: {
-      1: {},
-      2: {},
-      3: {},
-    },
-    consequenceLines: ["Land routes via border adjacency", "Lowest route CO₂", "Land or agricultural tiles"],
-  },
-  // --- Extraction (retained) ---
-  {
-    id: "extractor",
-    name: "Resource Extractor",
-    category: "extraction",
-    description: "Mines fuel, uranium, or rare earth from deposit tiles each cycle.",
-    workforce: 5,
-    costByTier: {
-      1: { money: 70 },
-      2: { money: 125 },
-      3: { money: 195 },
-    },
-    effectsByTier: {
-      1: {},
-      2: {},
-      3: {},
-    },
-    consequenceLines: ["Deposit tile only", "2/4/7 units per cycle by tier", "No research unlock needed"],
-  },
 ];
 
 export const BUILD_BY_ID = Object.fromEntries(
@@ -243,7 +214,6 @@ export const TRADE_ITEMS: { id: string; label: string; description: string }[] =
   { id: "rare_earth", label: "Rare Earth", description: "Manufacturing & industrial inputs" },
   { id: "uranium", label: "Uranium", description: "Nuclear fuel and advanced energy" },
   { id: "technology", label: "Technology", description: "Engineering capacity — build green/nuclear, tradeable" },
-  { id: "goods", label: "Goods", description: "Manufactured trade value" },
   { id: "transit_permission", label: "Transit Permission", description: "Enables indirect land trade" },
-  { id: "airspace_permission", label: "Airspace Permission", description: "Enables air routes" },
+  { id: "hub_upgrade", label: "Hub Upgrade", description: "Upgrade another country's transport hub tier (negotiated deal)" },
 ];

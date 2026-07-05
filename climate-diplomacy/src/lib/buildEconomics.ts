@@ -2,8 +2,9 @@ import type { HexData, ResourceDeposit } from "../types/hex";
 import type { BuildEffects, BuildType, PlacedBuilding } from "../types/game";
 import { BUILD_BY_ID } from "../config/builds";
 import { applyUnrestPopulationPenalty, shouldForceAllBuildingsIdle } from "./populationMechanics";
+import { HUB_EXTRA_UPKEEP_PER_LEVEL } from "./transportHub";
 
-const INFRA_TYPES = new Set<BuildType>(["airport", "dock", "transport_center"]);
+const INFRA_TYPES = new Set<BuildType>(["transport_hub"]);
 
 export const EXTRACTOR_YIELD: Record<1 | 2 | 3, number> = { 1: 2, 2: 4, 3: 7 };
 export const FOSSIL_FUEL_PER_CYCLE: Record<1 | 2 | 3, number> = { 1: 1, 2: 2, 3: 3 };
@@ -134,8 +135,7 @@ function applyManufacturingRareEarthBonus(
 ): BuildEffects {
   if (type !== "manufacturing" || rareEarthStock < 1) return effects;
   const next = { ...effects };
-  if (next.goods) next.goods = Math.round(next.goods * 1.5);
-  if (next.technology) next.technology = Math.round(next.technology * 1.33);
+  if (next.technology) next.technology = Math.floor(next.technology * 1.5);
   return next;
 }
 
@@ -205,6 +205,13 @@ export function computeBuildingCosts(
     const moneyUpkeep = { 1: -3, 2: -5, 3: -8 }[tier];
     const co2 = { 1: 3, 2: 4, 3: 5 }[tier];
     return { ...costs, money: (costs.money ?? 0) + moneyUpkeep, co2: (costs.co2 ?? 0) + co2 };
+  }
+
+  if (building.type === "transport_hub" && building.tier >= 3) {
+    const extraUpkeep = (building.extraLevel ?? 0) * HUB_EXTRA_UPKEEP_PER_LEVEL;
+    if (extraUpkeep > 0) {
+      return { ...costs, money: (costs.money ?? 0) - extraUpkeep };
+    }
   }
 
   return costs;

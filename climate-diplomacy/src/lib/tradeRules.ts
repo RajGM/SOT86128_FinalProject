@@ -11,7 +11,7 @@ import type {
 import type { RouteOption } from "./routeDetection";
 
 export function createTransportRoute(option: RouteOption): TransportRoute {
-  const hasPendingTransit = option.transitRegions.length > 0;
+  const hasPendingTransit = option.needsTransitApproval;
   return {
     id: `route-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     from: option.path[0],
@@ -19,9 +19,8 @@ export function createTransportRoute(option: RouteOption): TransportRoute {
     routeType: option.routeType,
     path: option.path,
     status: hasPendingTransit ? "pending" : "active",
-    emissionsPerCycle: option.emissionsPerCycle,
-    fromFacilityId: option.fromFacilityId,
-    toFacilityId: option.toFacilityId,
+    emissionsPerUnit: option.emissionsPerUnit,
+    fromHubId: option.fromHubId,
   };
 }
 
@@ -65,7 +64,13 @@ export function createTradeAgreement(
   item: TradeItem,
   amount: number,
   routeId: string,
-  tradeMode: TradeMode = "one_time"
+  tradeMode: TradeMode = "one_time",
+  hubUpgrade?: {
+    hubUpgradeBuildingId: string;
+    hubUpgradeToTier?: 2 | 3;
+    hubUpgradeExtraLevels?: number;
+    hubUpgradePayer?: CountryId;
+  }
 ): TradeAgreement {
   return {
     id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -76,6 +81,7 @@ export function createTradeAgreement(
     routeId,
     active: true,
     tradeMode,
+    ...hubUpgrade,
   };
 }
 

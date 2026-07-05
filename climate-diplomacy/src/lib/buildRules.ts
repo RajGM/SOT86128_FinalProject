@@ -1,6 +1,6 @@
 import type { HexData } from "../types/hex";
 import type { BuildDefinition, BuildEffects, BuildTierCost, BuildType, PlacedBuilding } from "../types/game";
-import { BUILD_BY_ID } from "../config/builds";
+import { BUILD_BY_ID, BUILD_DEFINITIONS } from "../config/builds";
 import { createHexLookup, getHexNeighborCoords } from "./hexUtils";
 
 export const DOCK_COASTAL_PLACEMENT_MESSAGE =
@@ -9,11 +9,11 @@ export const DOCK_COASTAL_PLACEMENT_MESSAGE =
 export const FARM_AGRICULTURAL_PLACEMENT_MESSAGE =
   "Can only be built on agricultural tiles";
 
-export const VILLAGE_TERRAIN_PLACEMENT_MESSAGE =
-  "Can only be built on agricultural or land tiles";
+export const TRANSPORT_HUB_T2_COASTAL_MESSAGE =
+  "Tier 2+ requires a coastal tile (enables sea routes)";
 
-export const TRANSPORT_CENTER_TERRAIN_MESSAGE =
-  "Can only be built on land or agricultural tiles";
+export const TRANSPORT_HUB_LAND_MESSAGE =
+  "Can only be built on land tiles (not ocean/arctic)";
 
 export const GREEN_TECH_REQUIREMENT_MESSAGE =
   "Requires technology to build (T1: 10, T2: 18, T3: 23 total)";
@@ -68,22 +68,21 @@ export function canPlaceFarm(hex: HexData, testingMode = false): BuildAvailabili
   return { available: true };
 }
 
-export function canPlaceVillage(hex: HexData, testingMode = false): BuildAvailability {
+export function canPlaceTransportHub(
+  hex: HexData,
+  tier: 1 | 2 | 3,
+  hexLookup: Map<string, HexData>,
+  testingMode = false
+): BuildAvailability {
   if (!testingMode && !hex.countryId) {
-    return { available: false, reason: VILLAGE_TERRAIN_PLACEMENT_MESSAGE };
+    return { available: false, reason: TRANSPORT_HUB_LAND_MESSAGE };
   }
-  if (hex.terrain !== "agricultural" && hex.terrain !== "land") {
-    return { available: false, reason: VILLAGE_TERRAIN_PLACEMENT_MESSAGE };
+  if (hex.terrain === "ocean" || hex.terrain === "arctic") {
+    return { available: false, reason: TRANSPORT_HUB_LAND_MESSAGE };
   }
-  return { available: true };
-}
-
-export function canPlaceTransportCenter(hex: HexData, testingMode = false): BuildAvailability {
-  if (!testingMode && !hex.countryId) {
-    return { available: false, reason: TRANSPORT_CENTER_TERRAIN_MESSAGE };
-  }
-  if (hex.terrain !== "land" && hex.terrain !== "agricultural") {
-    return { available: false, reason: TRANSPORT_CENTER_TERRAIN_MESSAGE };
+  if (tier >= 2) {
+    const coastal = canPlaceDock(hex, hexLookup, testingMode);
+    if (!coastal.available) return { available: false, reason: TRANSPORT_HUB_T2_COASTAL_MESSAGE };
   }
   return { available: true };
 }
@@ -159,18 +158,12 @@ export function canBuildOnTile(
 
   const lookup = hexLookup ?? createHexLookup([]);
 
-  if (build.id === "dock") {
-    const dockAvailability = canPlaceDock(hex, lookup, testingMode);
-    if (!dockAvailability.available) return dockAvailability;
+  if (build.id === "transport_hub") {
+    const hubAvailability = canPlaceTransportHub(hex, tier, lookup, testingMode);
+    if (!hubAvailability.available) return hubAvailability;
   } else if (build.id === "farm") {
     const farmAvailability = canPlaceFarm(hex, testingMode);
     if (!farmAvailability.available) return farmAvailability;
-  } else if (build.id === "village") {
-    const villageAvailability = canPlaceVillage(hex, testingMode);
-    if (!villageAvailability.available) return villageAvailability;
-  } else if (build.id === "transport_center") {
-    const tcAvailability = canPlaceTransportCenter(hex, testingMode);
-    if (!tcAvailability.available) return tcAvailability;
   } else if (build.id === "extractor") {
     const extractorAvailability = canPlaceExtractor(hex);
     if (!extractorAvailability.available) return extractorAvailability;
@@ -250,15 +243,15 @@ export function canUpgradeTier(currentTier: 1 | 2 | 3): currentTier is 1 | 2 {
 }
 
 export function canPostTier3Upgrade(type: BuildType, tier: 1 | 2 | 3): boolean {
-  return (type === "airport" || type === "dock" || type === "transport_center") && tier >= 3;
+  return type === "transport_hub" && tier >= 3;
 }
 
-export function getPostTier3UpgradeCost(build: BuildDefinition, extraLevel: number): number {
-  return getBuildCost(build, 1) * (extraLevel + 1);
+export function getPostTier3UpgradeCost(_build: BuildDefinition, _extraLevel: number): number {
+  return 50;
 }
 
 const EFFECT_KEYS: (keyof BuildEffects)[] = [
-  "money", "energy", "food", "population", "happiness", "co2", "technology", "goods",
+  "money", "energy", "food", "population", "happiness", "co2", "technology",
 ];
 
 export function getEffectDelta(
@@ -314,7 +307,7 @@ export function getAvailableBuildsForTile(
 ): { build: BuildDefinition; tier: 1 | 2 | 3; availability: BuildAvailability }[] {
   const lookup = hexLookup ?? createHexLookup([]);
   const results: { build: BuildDefinition; tier: 1 | 2 | 3; availability: BuildAvailability }[] = [];
-  for (const build of Object.values(BUILD_BY_ID)) {
+  for (const build of BUILD_DEFINITIONS) {
     for (const tier of [1, 2, 3] as const) {
       const availability = canBuildOnTile(
         hex,
@@ -326,11 +319,9 @@ export function getAvailableBuildsForTile(
         regionTech
       );
       const showBlocked =
-        build.id === "dock" ||
+        build.id === "transport_hub" ||
         build.id === "extractor" ||
         build.id === "farm" ||
-        build.id === "village" ||
-        build.id === "transport_center" ||
         (build.id === "green_plant" && getBuildTechCost(build, tier) > 0);
       if (availability.available || showBlocked) {
         results.push({ build, tier, availability });

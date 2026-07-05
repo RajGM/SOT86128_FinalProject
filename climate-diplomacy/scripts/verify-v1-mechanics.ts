@@ -7,6 +7,7 @@ import {
   computeIdleBuildingIds,
   computeMaterialShortageIdleIds,
   computeFarmClimateFoodAdjustment,
+  computeBuildingYields,
   EXTRACTOR_YIELD,
   FOSSIL_FUEL_PER_CYCLE,
   getExtractorYield,
@@ -19,7 +20,7 @@ import {
   computeTemperatureHappinessDelta,
   shouldForceAllBuildingsIdle,
 } from "../src/lib/populationMechanics";
-import { BUILD_BY_ID } from "../src/config/builds";
+import { BUILD_BY_ID, TRADE_ITEMS } from "../src/config/builds";
 import type { PlacedBuilding } from "../src/types/game";
 import { emptyDepositCounts } from "../src/types/hex";
 
@@ -110,6 +111,40 @@ const techProducers = Object.values(BUILD_BY_ID).filter((b) =>
 );
 check("Only Manufacturing produces technology", techProducers.length === 1 && techProducers[0].id === "manufacturing");
 
+// --- Cut goods (cut-goods.md) ---
+check("Goods removed from trade items", !TRADE_ITEMS.some((t) => t.id === "goods"));
+check(
+  "Industrial Complex T1 yields +35 money (no goods)",
+  BUILD_BY_ID.industrial_complex.effectsByTier[1].money === 35 &&
+    BUILD_BY_ID.industrial_complex.effectsByTier[1].goods === undefined
+);
+check(
+  "Manufacturing T1 yields +5 tech (no goods)",
+  BUILD_BY_ID.manufacturing.effectsByTier[1].technology === 5 &&
+    BUILD_BY_ID.manufacturing.effectsByTier[1].goods === undefined
+);
+check(
+  "Manufacturing T3 yields +12 tech",
+  BUILD_BY_ID.manufacturing.effectsByTier[3].technology === 12
+);
+const mfgT1: PlacedBuilding = {
+  id: "mfg-1",
+  type: "manufacturing",
+  tier: 1,
+  builtAt: 1,
+  q: 0,
+  r: 0,
+  countryId: "china",
+};
+const mfgYieldNoRe = computeBuildingYields(mfgT1, undefined, 0, new Set(), new Set());
+const mfgYieldWithRe = computeBuildingYields(mfgT1, undefined, 1, new Set(), new Set());
+check("Manufacturing T1 base tech yield is 5", mfgYieldNoRe.technology === 5);
+check("Manufacturing T1 with rare earth yields 7 tech (+50%)", mfgYieldWithRe.technology === 7);
+check(
+  "Regions have no goods field",
+  !("goods" in state.regions.usa)
+);
+
 // Cycle processing runs
 const withExtractor = {
   ...state,
@@ -136,33 +171,33 @@ check("Cycle counter advances", afterCycle.cycle === state.cycle + 1);
 // Green plant tech cost
 check("Green T1 costs 10 tech", BUILD_BY_ID.green_plant.costByTier[1].tech === 10);
 
-// 12 building types
-check("12 building types defined", Object.keys(BUILD_BY_ID).length === 12);
+// 9 building types
+check("9 building types defined", Object.keys(BUILD_BY_ID).length === 9);
 
 // --- Population mechanics (population-mechanics.md) ---
 check(
-  "China per-capita food drain is 42/cycle",
-  computePerCapitaConsumption(1400).food === 42
+  "China per-capita food drain is 3/cycle",
+  computePerCapitaConsumption(90).food === 3
 );
 check(
-  "USA per-capita food drain is 10/cycle",
-  computePerCapitaConsumption(330).food === 10
+  "USA per-capita food drain is 1/cycle",
+  computePerCapitaConsumption(33).food === 1
 );
 check(
-  "USA CO₂ > 500 gives −6 happiness/cycle",
-  computeNationalCo2HappinessDelta(520) === -6
+  "USA CO₂ 72 gives +2 happiness/cycle (under 100 threshold)",
+  computeNationalCo2HappinessDelta(72) === 2
 );
 check(
-  "India CO₂ 120 gives 0 happiness/cycle",
-  computeNationalCo2HappinessDelta(120) === 0
+  "India CO₂ 13 gives +2 happiness/cycle (under 100 threshold)",
+  computeNationalCo2HappinessDelta(13) === 2
 );
 check(
   "Global temp +2.3°C gives −5 happiness/cycle",
   computeTemperatureHappinessDelta(2.3) === -5
 );
 check(
-  "Unrest halves village population yield",
-  applyUnrestPopulationPenalty({ population: 30 }, "village", 40).population === 15
+  "Unrest halves city population yield",
+  applyUnrestPopulationPenalty({ population: 80 }, "city", 40).population === 40
 );
 check(
   "Stable happiness does not halve city yield",

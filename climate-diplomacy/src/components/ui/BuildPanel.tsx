@@ -11,18 +11,18 @@ import {
   canUpgradeTier,
   canPostTier3Upgrade,
   getPostTier3UpgradeCost,
-  DOCK_COASTAL_PLACEMENT_MESSAGE,
   EXTRACTOR_DEPOSIT_PLACEMENT_MESSAGE,
   FARM_AGRICULTURAL_PLACEMENT_MESSAGE,
-  VILLAGE_TERRAIN_PLACEMENT_MESSAGE,
-  TRANSPORT_CENTER_TERRAIN_MESSAGE,
+  TRANSPORT_HUB_T2_COASTAL_MESSAGE,
+  TRANSPORT_HUB_LAND_MESSAGE,
 } from "../../lib/buildRules";
 import { createHexLookup } from "../../lib/hexUtils";
 import { formatRoutePath } from "../../lib/routeDetection";
-import { INFRA_CAPACITY } from "../../types/game";
+import { getHubCapacity } from "../../lib/transportHub";
 import { hexToTileTags } from "../../types/game";
 import { COUNTRY_CONFIGS, RESOURCE_LABELS } from "../../types/hex";
 import type { BuildType } from "../../types/game";
+import { compareBuildsByDisplayOrder } from "../../config/builds";
 import { ConsequenceTree } from "./ConsequenceTree";
 import {
   getHappinessCascade,
@@ -83,7 +83,9 @@ export function BuildPanel() {
         reason: item.availability.reason,
       });
     }
-    return Array.from(map.values()).sort((a, b) => a.build.name.localeCompare(b.build.name));
+    return Array.from(map.values()).sort((a, b) =>
+      compareBuildsByDisplayOrder(a.build.id, b.build.id)
+    );
   }, [available]);
 
   useEffect(() => {
@@ -119,7 +121,7 @@ export function BuildPanel() {
   const canDemolish = demolishBreakdown !== null && region.money >= demolishBreakdown.demolitionFee;
   const nextTier = existing && canUpgradeTier(existing.tier) ? ((existing.tier + 1) as 2 | 3) : null;
 
-  const isTransport = existing?.type === "airport" || existing?.type === "dock" || existing?.type === "transport_center";
+  const isTransport = existing?.type === "transport_hub";
   const extraLevel = existing?.extraLevel ?? 0;
   const postTier3Cost = existingDef && existing && canPostTier3Upgrade(existing.type, existing.tier)
     ? getPostTier3UpgradeCost(existingDef, extraLevel)
@@ -128,10 +130,10 @@ export function BuildPanel() {
   const facilityCountry = existing?.countryId ?? regionId;
   const dependentRouteCount = isTransport && existing
     ? gameState.transportRoutes.filter(
-        (r) => r.status !== "disrupted" && (r.fromFacilityId === existing.id || r.toFacilityId === existing.id)
+        (r) => r.status !== "disrupted" && r.fromHubId === existing.id
       ).length
     : 0;
-  const facilityCapacity = existing ? INFRA_CAPACITY[existing.tier] : 0;
+  const hubCapacity = existing ? getHubCapacity(existing) : 0;
 
   const panelTitle = existing ? "Manage Build" : "Build on";
 
@@ -161,11 +163,9 @@ export function BuildPanel() {
     selectedPlacement !== null &&
     selectedPlacement !== undefined &&
     !selectedPlacement.available &&
-    (selectedBuildType === "dock" ||
+    (selectedBuildType === "transport_hub" ||
       selectedBuildType === "extractor" ||
       selectedBuildType === "farm" ||
-      selectedBuildType === "village" ||
-      selectedBuildType === "transport_center" ||
       selectedBuildType === "green_plant");
   const happinessCascade = getHappinessCascade(region.happiness);
   const constructionBlocked = isConstructionBlocked(region.happiness);
@@ -279,7 +279,7 @@ export function BuildPanel() {
               <div className="build-panel-scroll">
                 {isTransport && (
                   <div className="card" style={{ fontSize: 11 }}>
-                    Routes: {dependentRouteCount}/{facilityCapacity} capacity
+                    Capacity: {hubCapacity} units/cycle
                     {extraLevel > 0 && <span> · Extra level {extraLevel}</span>}
                   </div>
                 )}
@@ -293,7 +293,7 @@ export function BuildPanel() {
                       gameState.transportRoutes
                         .filter((r) =>
                           r.status !== "disrupted" &&
-                          (r.fromFacilityId === existing.id || r.toFacilityId === existing.id)
+                          r.fromHubId === existing.id
                         )
                         .map((r) => (
                           <div key={r.id} style={{ fontSize: 11, marginBottom: 4 }}>
@@ -324,7 +324,7 @@ export function BuildPanel() {
                     </div>
                     {isTransport && (
                       <div style={{ fontSize: 11, marginTop: 4, color: "#22c55e" }}>
-                        Capacity: {INFRA_CAPACITY[existing.tier]} → {INFRA_CAPACITY[nextTier]} routes
+                        Capacity: {hubCapacity} → {getHubCapacity({ ...existing, tier: nextTier })} units/cycle
                       </div>
                     )}
                   </div>
@@ -338,7 +338,7 @@ export function BuildPanel() {
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
-                      Reduces transport emissions by ~8% per level.
+                      +20 units/cycle capacity per level
                     </div>
                   </div>
                 )}
@@ -464,11 +464,10 @@ export function BuildPanel() {
                   )}
                   {placementBlocked && !selectedTypeEntry.tiers.find((t) => t.tier === selectedTier)?.reason && (
                     <div className="build-selection-note build-selection-error">
-                      {selectedBuildType === "dock" && DOCK_COASTAL_PLACEMENT_MESSAGE}
                       {selectedBuildType === "extractor" && EXTRACTOR_DEPOSIT_PLACEMENT_MESSAGE}
                       {selectedBuildType === "farm" && FARM_AGRICULTURAL_PLACEMENT_MESSAGE}
-                      {selectedBuildType === "village" && VILLAGE_TERRAIN_PLACEMENT_MESSAGE}
-                      {selectedBuildType === "transport_center" && TRANSPORT_CENTER_TERRAIN_MESSAGE}
+                      {selectedBuildType === "transport_hub" && selectedTier && selectedTier >= 2 && TRANSPORT_HUB_T2_COASTAL_MESSAGE}
+                      {selectedBuildType === "transport_hub" && selectedTier === 1 && TRANSPORT_HUB_LAND_MESSAGE}
                     </div>
                   )}
                 </div>
@@ -557,7 +556,7 @@ export function BuildPanel() {
                 setManageAction(null);
               }}
             >
-              Confirm Emission Upgrade
+              Confirm Capacity Upgrade
             </button>
           )}
 

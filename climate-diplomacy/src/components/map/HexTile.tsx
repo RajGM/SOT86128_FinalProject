@@ -17,12 +17,9 @@ const BUILD_ICONS: Record<string, string> = {
   nuclear_plant: "☢",
   industrial_complex: "🏗",
   manufacturing: "⚙",
-  village: "🏘",
   city: "🏙",
   farm: "🌾",
-  airport: "✈",
-  dock: "⚓",
-  transport_center: "🚛",
+  transport_hub: "🚉",
   extractor: "⛏",
 };
 

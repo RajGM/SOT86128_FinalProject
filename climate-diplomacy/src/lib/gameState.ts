@@ -7,9 +7,9 @@ import type {
   ResourceTotals,
   BuildEffects,
   TradeItem,
-  InfraType,
+  PlacedBuilding,
+  TradeAgreement,
 } from "../types/game";
-import { INFRA_UPKEEP } from "../types/game";
 import { REGION_PROFILES } from "../config/regionProfiles";
 import { BUILD_BY_ID } from "../config/builds";
 import {
@@ -27,6 +27,7 @@ import {
   clampResourceFloors,
   computePerCapitaConsumption,
 } from "./populationMechanics";
+import { HUB_POST_T3_UPGRADE_COST } from "./transportHub";
 
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
@@ -93,6 +94,7 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
     transitAgreements: [],
     transitRequests: [],
     highlightedRoutes: [],
+    transportCapacityUsed: {},
     breakthroughProposal: null,
     combinedProjects: [],
     researchLicenses: [],
@@ -106,7 +108,7 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
 export function aggregateResources(regions: Record<CountryId, RegionState>): ResourceTotals {
   const totals: ResourceTotals = {
     money: 0, energy: 0, food: 0, population: 0,
-    happiness: 0, co2: 0, technology: 0, goods: 0,
+    happiness: 0, co2: 0, technology: 0,
   };
   const ids = Object.keys(regions) as CountryId[];
   for (const id of ids) {
@@ -118,7 +120,6 @@ export function aggregateResources(regions: Record<CountryId, RegionState>): Res
     totals.happiness += r.happiness;
     totals.co2 += r.co2;
     totals.technology += r.technology;
-    totals.goods += r.goods;
   }
   totals.happiness = Math.round(totals.happiness / ids.length);
   totals.technology = Math.round(totals.technology / ids.length);
@@ -153,7 +154,6 @@ export function applyTradeTransfer(
     food: item === "food" ? amount : 0,
     population: item === "population" ? amount : 0,
     technology: item === "technology" ? amount : 0,
-    goods: item === "goods" ? amount : 0,
   };
 
   const fromAbstract: BuildEffects = {
@@ -162,7 +162,6 @@ export function applyTradeTransfer(
     food: item === "food" ? -amount : 0,
     population: item === "population" ? -amount : 0,
     technology: item === "technology" ? -amount : 0,
-    goods: item === "goods" ? -amount : 0,
   };
 
   if (item === "money" && from.money < amount) return null;
@@ -170,7 +169,6 @@ export function applyTradeTransfer(
   if (item === "food" && from.food < amount) return null;
   if (item === "population" && from.population < amount) return null;
   if (item === "technology" && from.technology < amount) return null;
-  if (item === "goods" && from.goods < amount) return null;
 
   return {
     from: applyEffectsToRegion(from, fromAbstract),
@@ -178,12 +176,48 @@ export function applyTradeTransfer(
   };
 }
 
+/** Apply hub upgrade from a trade agreement. Returns updated buildings or null if invalid. */
+export function applyHubUpgradeFromTrade(
+  tileBuildings: Record<string, PlacedBuilding>,
+  trade: TradeAgreement
+): Record<string, PlacedBuilding> | null {
+  if (trade.item !== "hub_upgrade" || !trade.hubUpgradeBuildingId) return null;
+
+  const building = Object.values(tileBuildings).find((b) => b.id === trade.hubUpgradeBuildingId);
+  if (!building || building.type !== "transport_hub") return null;
+
+  const key = `${building.q},${building.r}`;
+  let updated = { ...building };
+
+  if (trade.hubUpgradeToTier && trade.hubUpgradeToTier > building.tier) {
+    updated = { ...updated, tier: trade.hubUpgradeToTier };
+  }
+  if (trade.hubUpgradeExtraLevels && trade.hubUpgradeExtraLevels > 0) {
+    updated = {
+      ...updated,
+      extraLevel: (updated.extraLevel ?? 0) + trade.hubUpgradeExtraLevels,
+    };
+  }
+
+  return { ...tileBuildings, [key]: updated };
+}
+
+export function getHubUpgradeMoneyCost(trade: TradeAgreement): number {
+  if (trade.item !== "hub_upgrade") return 0;
+  if (trade.hubUpgradeExtraLevels) {
+    return HUB_POST_T3_UPGRADE_COST * trade.hubUpgradeExtraLevels;
+  }
+  if (trade.hubUpgradeToTier === 2) return 70;
+  if (trade.hubUpgradeToTier === 3) return 90;
+  return 0;
+}
+
 export function getRegionForHex(countryId: CountryId | null): CountryId {
   return countryId ?? "usa";
 }
 
 const REGION_EFFECT_KEYS: (keyof BuildEffects)[] = [
-  "money", "energy", "food", "population", "happiness", "co2", "technology", "goods",
+  "money", "energy", "food", "population", "happiness", "co2", "technology",
 ];
 
 /** Allow food/energy to go negative briefly for shortage detection. */
@@ -236,7 +270,9 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   let cycleCo2 = 0;
 
   const hexMap = new Map(hexes.map((h) => [`${h.q},${h.r}`, h]));
-  const INFRA_TYPES: InfraType[] = ["airport", "dock", "transport_center"];
+
+  // Reset per-cycle transport capacity at start of trade processing
+  let transportCapacityUsed: Partial<Record<CountryId, number>> = {};
 
   // 1. Per-capita consumption
   for (const id of ALL_COUNTRIES) {
@@ -292,7 +328,7 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
       ),
     };
 
-    // 5. Building yields (unrest halves village/city growth)
+    // 5. Building yields (unrest halves city growth)
     for (const building of regionBuildings) {
       const hex = hexMap.get(`${building.q},${building.r}`);
       const yields = computeBuildingYields(
@@ -309,30 +345,25 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
       }
     }
 
-    // 6. Building recurring costs + infrastructure upkeep
+    // 6. Building recurring costs
     for (const building of regionBuildings) {
       const costs = computeBuildingCosts(building, workforceIdle, materialIdle);
       if (Object.keys(costs).length > 0) {
         region = applyEffectsToRegion(region, costs);
         cycleCo2 += costs.co2 ?? 0;
       }
-
-      if (INFRA_TYPES.includes(building.type as InfraType) && !workforceIdle.has(building.id)) {
-        const infraType = building.type as InfraType;
-        const upkeep = INFRA_UPKEEP[infraType][building.tier];
-        region = { ...region, money: region.money - upkeep };
-      }
     }
 
     regions = { ...regions, [id]: region };
   }
 
-  // 7. Trade processing
+  // 7. Trade processing (continuous trades; capacity + CO₂ per unit)
   for (const trade of tradeAgreements) {
     if (!trade.active || trade.tradeMode !== "continuous") continue;
     const route = transportRoutes.find((r) => r.id === trade.routeId);
+    if (!route || route.status !== "active") continue;
 
-    const co2 = route?.emissionsPerCycle ?? 0;
+    const co2 = (route.emissionsPerUnit ?? 0) * trade.amount;
     if (co2 > 0) {
       const fromRegion = regions[trade.from];
       regions = {
@@ -341,6 +372,11 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
       };
       cycleCo2 += co2;
     }
+
+    transportCapacityUsed = {
+      ...transportCapacityUsed,
+      [trade.from]: (transportCapacityUsed[trade.from] ?? 0) + trade.amount,
+    };
 
     const routeTransits = transitAgreements.filter(
       (a) => a.routeId === trade.routeId && a.status === "active" && a.feeModel === "commission"
@@ -359,7 +395,22 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
 
     const fromR = regions[trade.from];
     const toR = regions[trade.to];
-    const transferred = applyTradeTransfer(fromR, toR, trade.item, trade.amount);
+    let transferred = applyTradeTransfer(fromR, toR, trade.item, trade.amount);
+
+    if (trade.item === "hub_upgrade") {
+      const upgraded = applyHubUpgradeFromTrade(tileBuildings, trade);
+      if (upgraded) tileBuildings = upgraded;
+      const upgradeCost = getHubUpgradeMoneyCost(trade);
+      const payer = trade.hubUpgradePayer ?? trade.from;
+      if (upgradeCost > 0 && regions[payer].money >= upgradeCost) {
+        regions = {
+          ...regions,
+          [payer]: { ...regions[payer], money: regions[payer].money - upgradeCost },
+        };
+      }
+      transferred = { from: fromR, to: toR };
+    }
+
     if (transferred) {
       regions = {
         ...regions,
@@ -477,6 +528,7 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     transitAgreements,
     transportRoutes,
     tradeAgreements,
+    transportCapacityUsed,
     globalTemperature,
     worldHappiness,
     cycle: prev.cycle + 1,

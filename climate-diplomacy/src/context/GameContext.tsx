@@ -8,7 +8,7 @@ import type {
   TradeMode,
   TransitFeeModel,
 } from "../types/game";
-import { createInitialGameState, getRegionForHex, co2TemperatureDelta, processCycle, applyTradeTransfer } from "../lib/gameState";
+import { createInitialGameState, getRegionForHex, co2TemperatureDelta, processCycle, applyTradeTransfer, getHubUpgradeMoneyCost, applyHubUpgradeFromTrade } from "../lib/gameState";
 import {
   createPlacedBuilding,
   getBuildCost,
@@ -23,6 +23,7 @@ import {
   canPostTier3Upgrade,
   getPostTier3UpgradeCost,
   canBuildOnTile,
+  canPlaceTransportHub,
 } from "../lib/buildRules";
 import { createHexLookup } from "../lib/hexUtils";
 import {
@@ -31,7 +32,8 @@ import {
   createTransitRequests,
   createTransitAgreement,
 } from "../lib/tradeRules";
-import { findRouteOptions, type RouteOption } from "../lib/routeDetection";
+import { findBestRoute, findRouteOptions, findExistingRoute, type RouteOption } from "../lib/routeDetection";
+import { getCountryTotalCapacity } from "../lib/transportHub";
 import { tileKey } from "../types/game";
 import { BUILD_BY_ID } from "../config/builds";
 import { isConstructionBlocked } from "../lib/populationMechanics";
@@ -55,9 +57,21 @@ interface GameContextValue {
   demolishBuild: () => void;
   upgradeBuild: () => void;
   postTier3Upgrade: () => void;
-  getRouteOptions: (from: CountryId, to: CountryId) => RouteOption[];
-  createRoute: (option: RouteOption) => void;
-  proposeTrade: (from: CountryId, to: CountryId, item: TradeItem, amount: number, routeId: string, tradeMode?: TradeMode) => void;
+  getRoutePreview: (from: CountryId, to: CountryId) => RouteOption | null;
+  getTransportCapacity: (countryId: CountryId) => { total: number; used: number; remaining: number };
+  proposeTrade: (
+    from: CountryId,
+    to: CountryId,
+    item: TradeItem,
+    amount: number,
+    tradeMode?: TradeMode,
+    hubUpgrade?: {
+      hubUpgradeBuildingId: string;
+      hubUpgradeToTier?: 2 | 3;
+      hubUpgradeExtraLevels?: number;
+      hubUpgradePayer?: CountryId;
+    }
+  ) => void;
   respondTransitRequest: (requestId: string, feeModel: TransitFeeModel, feeAmount: number, accept: boolean) => void;
   cancelTransit: (agreementId: string) => void;
   acceptTransitTerms: (agreementId: string) => void;
@@ -156,7 +170,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
       // Disrupt routes using this facility
       const disruptedRouteIds = new Set(
         prev.transportRoutes
-          .filter((r) => r.fromFacilityId === existing.id || r.toFacilityId === existing.id)
+          .filter((r) => r.fromHubId === existing.id)
           .map((r) => r.id)
       );
 
@@ -198,6 +212,11 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
       if (!canAffordUpgrade(region.money, region.technology, build, existing.tier)) return prev;
 
       const nextTier = (existing.tier + 1) as 2 | 3;
+
+      if (existing.type === "transport_hub" && nextTier >= 2) {
+        const hubCheck = canPlaceTransportHub(selectedHex, nextTier, hexLookup, prev.testingMode);
+        if (!hubCheck.available) return prev;
+      }
 
       return {
         ...prev,
@@ -244,74 +263,153 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         },
       };
     });
-  }, [selectedHex, resolveRegionId]);
+  }, [selectedHex, resolveRegionId, hexLookup]);
 
-  // Route system — separate from trades
-  const getRouteOptions = useCallback(
-    (from: CountryId, to: CountryId): RouteOption[] => {
-      return findRouteOptions(from, to, Object.values(gameState.tileBuildings), gameState.transportRoutes);
-    },
-    [gameState.tileBuildings, gameState.transportRoutes]
+  const buildingsList = useMemo(
+    () => Object.values(gameState.tileBuildings),
+    [gameState.tileBuildings]
   );
 
-  const createRoute = useCallback(
-    (option: RouteOption) => {
-      setGameState((prev) => {
-        const route = createTransportRoute(option);
-        const transitRequests = option.transitRegions.length > 0
-          ? createTransitRequests(route)
-          : [];
-
-        return {
-          ...prev,
-          transportRoutes: [...prev.transportRoutes, route],
-          transitRequests: [...prev.transitRequests, ...transitRequests],
-        };
-      });
+  const getRoutePreview = useCallback(
+    (from: CountryId, to: CountryId): RouteOption | null => {
+      return findBestRoute(
+        from,
+        to,
+        buildingsList,
+        hexes,
+        gameState.transitAgreements
+      );
     },
-    []
+    [buildingsList, hexes, gameState.transitAgreements]
+  );
+
+  const getTransportCapacity = useCallback(
+    (countryId: CountryId) => {
+      const total = getCountryTotalCapacity(countryId, buildingsList);
+      const used = gameState.transportCapacityUsed[countryId] ?? 0;
+      return { total, used, remaining: Math.max(0, total - used) };
+    },
+    [buildingsList, gameState.transportCapacityUsed]
   );
 
   const proposeTrade = useCallback(
-    (from: CountryId, to: CountryId, item: TradeItem, amount: number, routeId: string, tradeMode: TradeMode = "one_time") => {
+    (
+      from: CountryId,
+      to: CountryId,
+      item: TradeItem,
+      amount: number,
+      tradeMode: TradeMode = "one_time",
+      hubUpgrade?: {
+        hubUpgradeBuildingId: string;
+        hubUpgradeToTier?: 2 | 3;
+        hubUpgradeExtraLevels?: number;
+        hubUpgradePayer?: CountryId;
+      }
+    ) => {
       setGameState((prev) => {
-        const route = prev.transportRoutes.find((r) => r.id === routeId);
+        if (amount <= 0) return prev;
+
+        const buildings = Object.values(prev.tileBuildings);
+        const capacity = getCountryTotalCapacity(from, buildings);
+        const used = prev.transportCapacityUsed[from] ?? 0;
+        const transportUnits = item === "hub_upgrade" ? 0 : amount;
+
+        if (transportUnits > 0 && used + transportUnits > capacity) return prev;
+
+        let route = item === "hub_upgrade"
+          ? { id: "hub-upgrade", status: "active" as const, emissionsPerUnit: 0, from: from, to: to, routeType: "land" as const, path: [from, to] }
+          : findExistingRoute(from, to, prev.transportRoutes);
+        let transportRoutes = prev.transportRoutes;
+        let transitRequests = prev.transitRequests;
+
+        if (item !== "hub_upgrade" && !route) {
+          const option = findBestRoute(from, to, buildings, hexes, prev.transitAgreements);
+          if (!option) return prev;
+
+          const newRoute = createTransportRoute(option);
+          route = newRoute;
+          transportRoutes = [...transportRoutes, newRoute];
+          if (option.transitRegions.length > 0) {
+            transitRequests = [...transitRequests, ...createTransitRequests(newRoute)];
+          }
+
+          if (option.needsTransitApproval) {
+            return {
+              ...prev,
+              transportRoutes,
+              transitRequests,
+            };
+          }
+        }
+
         if (!route || route.status !== "active") return prev;
 
-        const agreement = createTradeAgreement(from, to, item, amount, routeId, tradeMode);
+        const agreement = createTradeAgreement(
+          from,
+          to,
+          item,
+          amount,
+          route.id,
+          tradeMode,
+          hubUpgrade
+        );
 
-        // For one-time trades, apply immediately
         if (tradeMode === "one_time") {
-          const co2 = route.emissionsPerCycle;
+          const co2 = (route.emissionsPerUnit ?? 0) * transportUnits;
           const fromR = prev.regions[from];
           const toR = prev.regions[to];
-          const transferred = applyTradeTransfer(fromR, toR, item, amount);
-          if (!transferred) return prev;
 
-          const fromWithCo2 = co2 > 0
-            ? { ...transferred.from, co2: transferred.from.co2 + co2 }
-            : transferred.from;
+          let transferred = applyTradeTransfer(fromR, toR, item, amount);
+          if (item !== "hub_upgrade" && !transferred) return prev;
+
+          let tileBuildings = prev.tileBuildings;
+          let regions = { ...prev.regions };
+
+          if (item === "hub_upgrade" && hubUpgrade) {
+            const upgraded = applyHubUpgradeFromTrade(tileBuildings, agreement);
+            if (!upgraded) return prev;
+            tileBuildings = upgraded;
+            const upgradeCost = getHubUpgradeMoneyCost(agreement);
+            const payer = hubUpgrade.hubUpgradePayer ?? from;
+            if (upgradeCost > 0) {
+              if (regions[payer].money < upgradeCost) return prev;
+              regions = {
+                ...regions,
+                [payer]: { ...regions[payer], money: regions[payer].money - upgradeCost },
+              };
+            }
+          } else if (transferred) {
+            const fromWithCo2 =
+              co2 > 0
+                ? { ...transferred.from, co2: transferred.from.co2 + co2 }
+                : transferred.from;
+            regions = { ...regions, [from]: fromWithCo2, [to]: transferred.to };
+          }
 
           return {
             ...prev,
+            tileBuildings,
+            transportRoutes,
+            transitRequests,
             tradeAgreements: [...prev.tradeAgreements, agreement],
-            regions: {
-              ...prev.regions,
-              [from]: fromWithCo2,
-              [to]: transferred.to,
+            regions,
+            transportCapacityUsed: {
+              ...prev.transportCapacityUsed,
+              [from]: used + transportUnits,
             },
             globalTemperature: prev.globalTemperature + co2TemperatureDelta(co2),
           };
         }
 
-        // Continuous trades are processed each cycle
         return {
           ...prev,
+          transportRoutes,
+          transitRequests,
           tradeAgreements: [...prev.tradeAgreements, agreement],
         };
       });
     },
-    []
+    [hexes]
   );
 
   const respondTransitRequest = useCallback(
@@ -474,8 +572,8 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         demolishBuild,
         upgradeBuild,
         postTier3Upgrade,
-        getRouteOptions,
-        createRoute,
+        getRoutePreview,
+        getTransportCapacity,
         proposeTrade,
         advanceCycle,
         respondTransitRequest,

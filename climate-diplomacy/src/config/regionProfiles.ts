@@ -9,8 +9,8 @@ export const REGION_PROFILES: Record<CountryId, RegionProfile> = {
     mainWeakness: "High emissions, political polarization",
     agenda: ["Money", "Industry", "Consumer prices", "Technology", "Moderate transition"],
     startingResources: {
-      money: 850, energy: 420, food: 380, population: 330,
-      happiness: 72, co2: 520, technology: 75, goods: 280,
+      money: 85, energy: 42, food: 38, population: 33,
+      happiness: 72, co2: 72, technology: 75,
     },
   },
   eu: {
@@ -20,8 +20,8 @@ export const REGION_PROFILES: Record<CountryId, RegionProfile> = {
     mainWeakness: "Limited raw resources, energy dependence",
     agenda: ["Clean energy", "Regulation", "International cooperation", "Social stability"],
     startingResources: {
-      money: 620, energy: 280, food: 240, population: 220,
-      happiness: 78, co2: 180, technology: 85, goods: 210,
+      money: 62, energy: 28, food: 24, population: 22,
+      happiness: 78, co2: 20, technology: 85,
     },
   },
   russia: {
@@ -31,8 +31,8 @@ export const REGION_PROFILES: Record<CountryId, RegionProfile> = {
     mainWeakness: "Fossil dependence, lower diversification",
     agenda: ["Fossil revenue", "Energy leverage", "Stability", "Slow transition"],
     startingResources: {
-      money: 380, energy: 480, food: 200, population: 180,
-      happiness: 65, co2: 340, technology: 55, goods: 120,
+      money: 38, energy: 48, food: 20, population: 18,
+      happiness: 65, co2: 37, technology: 55,
     },
   },
   china: {
@@ -42,8 +42,8 @@ export const REGION_PROFILES: Record<CountryId, RegionProfile> = {
     mainWeakness: "High energy demand, high emissions",
     agenda: ["Manufacturing", "Energy security", "Technology", "Stability"],
     startingResources: {
-      money: 720, energy: 560, food: 420, population: 1400,
-      happiness: 68, co2: 680, technology: 70, goods: 450,
+      money: 72, energy: 56, food: 42, population: 90,
+      happiness: 68, co2: 78, technology: 70,
     },
   },
   india: {
@@ -53,8 +53,8 @@ export const REGION_PROFILES: Record<CountryId, RegionProfile> = {
     mainWeakness: "Energy shortage, lower money/technology",
     agenda: ["Development", "Energy access", "Food security", "Climate justice"],
     startingResources: {
-      money: 280, energy: 180, food: 320, population: 1380,
-      happiness: 62, co2: 120, technology: 45, goods: 150,
+      money: 28, energy: 18, food: 32, population: 88,
+      happiness: 62, co2: 13, technology: 45,
     },
   },
   opec: {
@@ -64,8 +64,8 @@ export const REGION_PROFILES: Record<CountryId, RegionProfile> = {
     mainWeakness: "Low food diversity, fossil lock-in",
     agenda: ["Fossil exports", "Money", "Stability", "Paid diversification"],
     startingResources: {
-      money: 540, energy: 620, food: 140, population: 280,
-      happiness: 70, co2: 380, technology: 40, goods: 90,
+      money: 54, energy: 62, food: 14, population: 28,
+      happiness: 70, co2: 42, technology: 40,
     },
   },
   latam: {
@@ -75,8 +75,8 @@ export const REGION_PROFILES: Record<CountryId, RegionProfile> = {
     mainWeakness: "Infrastructure and finance gaps",
     agenda: ["Food exports", "Forest protection payments", "Development finance"],
     startingResources: {
-      money: 320, energy: 220, food: 480, population: 420,
-      happiness: 66, co2: 90, technology: 38, goods: 110,
+      money: 32, energy: 22, food: 48, population: 52,
+      happiness: 66, co2: 10, technology: 38,
     },
   },
   africa: {
@@ -86,8 +86,8 @@ export const REGION_PROFILES: Record<CountryId, RegionProfile> = {
     mainWeakness: "Energy access and capital shortage",
     agenda: ["Energy access", "Development", "Climate finance", "Food security"],
     startingResources: {
-      money: 180, energy: 120, food: 260, population: 1300,
-      happiness: 58, co2: 60, technology: 30, goods: 80,
+      money: 18, energy: 12, food: 26, population: 82,
+      happiness: 58, co2: 7, technology: 30,
     },
   },
 };

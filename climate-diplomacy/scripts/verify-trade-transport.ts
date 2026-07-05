@@ -1,5 +1,19 @@
-import { findRouteOptions, hasLandConnection, hasFacilityCapacity } from "../src/lib/routeDetection";
-import { applyTradeTransfer, createInitialGameState } from "../src/lib/gameState";
+import {
+  findBestRoute,
+  hasLandConnection,
+  findAllLandPaths,
+} from "../src/lib/routeDetection";
+import {
+  applyTradeTransfer,
+  createInitialGameState,
+} from "../src/lib/gameState";
+import {
+  getHubCapacity,
+  getCountryTotalCapacity,
+  getCountryMaxHubTier,
+  HUB_BASE_CAPACITY,
+  ROUTE_CO2_PER_UNIT,
+} from "../src/lib/transportHub";
 import { createTransportRoute } from "../src/lib/tradeRules";
 import type { PlacedBuilding } from "../src/types/game";
 
@@ -16,76 +30,111 @@ function check(name: string, cond: boolean, detail = "") {
   }
 }
 
-const mkBuilding = (
+const mkHub = (
   id: string,
-  type: PlacedBuilding["type"],
   countryId: PlacedBuilding["countryId"],
-  tier: 1 | 2 | 3 = 1
+  tier: 1 | 2 | 3 = 1,
+  extraLevel = 0
 ): PlacedBuilding => ({
   id,
-  type,
+  type: "transport_hub",
   tier,
+  extraLevel: extraLevel > 0 ? extraLevel : undefined,
   builtAt: Date.now(),
   q: 0,
   r: 0,
   countryId,
 });
 
+const emptyHexes: never[] = [];
+
+// --- Hub capacity ---
+check("T1 hub capacity is 20", getHubCapacity(mkHub("h1", "india", 1)) === 20);
+check("T2 hub capacity is 40", getHubCapacity(mkHub("h2", "india", 2)) === 40);
+check("T3 hub capacity is 60", getHubCapacity(mkHub("h3", "india", 3)) === 60);
+check(
+  "T3+1 hub capacity is 80",
+  getHubCapacity(mkHub("h4", "india", 3, 1)) === 80
+);
+check(
+  "Two T1 hubs stack to 40",
+  getCountryTotalCapacity("india", [mkHub("a", "india", 1), mkHub("b", "india", 1)]) === 40
+);
+
 // --- Route prerequisites ---
-const noBuildings: PlacedBuilding[] = [];
-check("No infra => no routes USA->EU", findRouteOptions("usa", "eu", noBuildings, []).length === 0);
+const noHubs: PlacedBuilding[] = [];
+check(
+  "No hub => no route USA->EU",
+  findBestRoute("usa", "eu", noHubs, emptyHexes, []) === null
+);
 
-const usaAir = mkBuilding("usa-air", "airport", "usa");
-const euAir = mkBuilding("eu-air", "airport", "eu");
-const airOpts = findRouteOptions("usa", "eu", [usaAir, euAir], []);
-check("Air route needs airports both ends", airOpts.some((o) => o.routeType === "air"));
-check("Air route is direct path", airOpts[0]?.path.length === 2);
-
-const usaDock = mkBuilding("usa-dock", "dock", "usa");
-const euDock = mkBuilding("eu-dock", "dock", "eu");
-const seaOpts = findRouteOptions("usa", "eu", [usaDock, euDock], []);
-check("Sea route needs docks both ends", seaOpts.some((o) => o.routeType === "sea"));
+const usaT3 = mkHub("usa-hub", "usa", 3);
+const usaEuRoute = findBestRoute("usa", "eu", [usaT3], emptyHexes, []);
+check("Land-connected pair prefers land over air", usaEuRoute?.routeType === "land");
+check("USA-EU land path is multi-hop", (usaEuRoute?.path.length ?? 0) >= 4);
+check("Land CO₂ per unit on USA-EU", usaEuRoute?.emissionsPerUnit === ROUTE_CO2_PER_UNIT.land);
 
 check("USA-EU has multi-hop land connection", hasLandConnection("usa", "eu"));
 check("USA-Latam land connection", hasLandConnection("usa", "latam"));
 
-const usaTc = mkBuilding("usa-tc", "transport_center", "usa");
-const latamTc = mkBuilding("latam-tc", "transport_center", "latam");
-const landOpts = findRouteOptions("usa", "latam", [usaTc, latamTc], []);
+const usaT1 = mkHub("usa-t1", "usa", 1);
+const latamT1 = mkHub("latam-t1", "latam", 1);
+const landRoute = findBestRoute("usa", "latam", [usaT1, latamT1], emptyHexes, []);
 check(
-  "Direct land route USA-Latam",
-  landOpts.some((o) => o.routeType === "land" && o.path.length === 2)
+  "T1 land route USA-Latam",
+  landRoute?.routeType === "land" && landRoute.path.length === 2
 );
 
-// Multi-hop land: usa -> latam -> africa -> eu
-const africaTc = mkBuilding("africa-tc", "transport_center", "africa");
-const euTc = mkBuilding("eu-tc", "transport_center", "eu");
-const multiLand = findRouteOptions("usa", "eu", [usaTc, latamTc, africaTc, euTc], []);
-check("Multi-hop land USA-EU exists", multiLand.some((o) => o.transitRegions.length >= 2));
+const indiaT1 = mkHub("india-t1", "india", 1);
+const chinaT1 = mkHub("china-t1", "china", 1);
+const opecT1 = mkHub("opec-t1", "opec", 1);
+const multiLand = findBestRoute(
+  "india",
+  "opec",
+  [indiaT1, chinaT1, opecT1],
+  emptyHexes,
+  []
+);
+check("Multi-hop land India-OPEC exists", multiLand?.routeType === "land");
+check("Land CO₂ per unit is 3", multiLand?.emissionsPerUnit === ROUTE_CO2_PER_UNIT.land);
 
-// --- Capacity ---
-const t1 = mkBuilding("fac1", "airport", "usa", 1);
+// --- Reach tiers ---
+check(
+  "Max tier with T1 hub is 1",
+  getCountryMaxHubTier("india", [mkHub("x", "india", 1)]) === 1
+);
+check(
+  "Max tier stacks across hubs",
+  getCountryMaxHubTier("india", [mkHub("a", "india", 1), mkHub("b", "india", 3)]) === 3
+);
+
+// --- Route creation ---
 const route1 = createTransportRoute({
   routeType: "air",
   path: ["usa", "eu"],
   transitRegions: [],
-  emissionsPerCycle: 8,
-  fromFacilityId: "fac1",
-  toFacilityId: "eu-air",
+  emissionsPerUnit: 8,
+  fromHubId: "usa-hub",
   label: "test",
+  needsTransitApproval: false,
 });
-const routes = [{ ...route1, status: "active" as const, to: "eu" as const, from: "usa" as const }];
-check("T1 facility has capacity with 1 route", hasFacilityCapacity(t1, routes));
-check(
-  "T1 at capacity after 2 routes on same facility",
-  !hasFacilityCapacity(t1, [
-    ...routes,
-    { ...route1, id: "r2", fromFacilityId: "fac1" },
-  ])
-);
+check("Route has emissionsPerUnit", route1.emissionsPerUnit === 8);
+check("Route without transit is active", route1.status === "active");
+
+const pendingRoute = createTransportRoute({
+  routeType: "land",
+  path: ["usa", "latam", "africa", "eu"],
+  transitRegions: ["latam", "africa"],
+  emissionsPerUnit: 3,
+  label: "multi",
+  needsTransitApproval: true,
+});
+check("Route with pending transit is pending", pendingRoute.status === "pending");
 
 // --- Trade transfers ---
 const state = createInitialGameState();
+check("Initial transportCapacityUsed is empty", Object.keys(state.transportCapacityUsed).length === 0);
+
 const from = {
   ...state.regions.usa,
   deposits: { ...state.regions.usa.deposits, fuel: 100 },
@@ -119,17 +168,11 @@ check(
   moneyXfer?.from.money === 900 && (moneyXfer?.to.money ?? 0) > state.regions.eu.money
 );
 
-// Sea route without dock at one end
-check(
-  "Sea blocked without both docks",
-  findRouteOptions("usa", "eu", [usaDock], []).filter((o) => o.routeType === "sea").length === 0
-);
+// Land paths BFS
+const paths = findAllLandPaths("usa", "eu", 3);
+check("USA-EU has multi-hop land paths", paths.some((p) => p.length >= 4));
 
-// Land blocked without transport centers
-check(
-  "Land blocked without transport centers",
-  findRouteOptions("usa", "latam", [], []).length === 0
-);
+check("HUB_BASE_CAPACITY T1 is 20", HUB_BASE_CAPACITY[1] === 20);
 
 console.log(`\n--- ${passed} passed, ${failed} failed ---`);
 process.exit(failed > 0 ? 1 : 0);

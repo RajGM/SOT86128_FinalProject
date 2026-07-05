@@ -15,7 +15,7 @@ interface ConsequenceTreeProps {
 }
 
 const EFFECT_KEYS: (keyof BuildEffects)[] = [
-  "money", "energy", "food", "population", "happiness", "co2", "technology", "goods",
+  "money", "energy", "food", "population", "happiness", "co2", "technology",
 ];
 
 function formatEffectLines(effects: BuildEffects, prefix: string): string[] {

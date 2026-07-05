@@ -46,8 +46,8 @@ export function TechnologyPanel() {
       <div className="section-title">The Loop</div>
       <div className="card" style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>
         <ol style={{ margin: 0, paddingLeft: 18 }}>
-          <li>Build <strong>Manufacturing</strong> → generates tech each cycle (+3/+5/+8)</li>
-          <li>Rare earth stockpile ≥ 1 → +50% goods, +33% tech from Manufacturing</li>
+          <li>Build <strong>Manufacturing</strong> → generates tech each cycle (+5/+8/+12)</li>
+          <li>Rare earth stockpile ≥ 1 → +50% tech from Manufacturing</li>
           <li>Spend tech to place Green or Nuclear plants</li>
           <li>Import tech via trade if you lack Manufacturing</li>
         </ol>
@@ -67,8 +67,8 @@ export function TechnologyPanel() {
 
       <div className="section-title">Build Catalog ({BUILD_DEFINITIONS.length} types)</div>
       <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
-        Energy (fossil, green, nuclear), economy (industrial, manufacturing), population (village, city),
-        food (farm), extraction (extractor), transport (airport, dock, land center).
+        Energy (fossil, green, nuclear), economy (industrial, manufacturing), population (city),
+        food (farm), extraction (extractor), transport (transport hub).
       </div>
     </div>
   );
