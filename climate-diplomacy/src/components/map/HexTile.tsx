@@ -2,10 +2,12 @@ import { memo } from "react";
 import { HexData, TERRAIN_COLORS, COUNTRY_CONFIGS } from "../../types/hex";
 import { hexToPixel, hexCorners } from "../../lib/hexUtils";
 import { HEX_SIZE } from "../../config/constants";
+import type { PlacedBuilding } from "../../types/game";
 
 interface HexTileProps {
   hex: HexData;
   selected?: boolean;
+  building?: PlacedBuilding | null;
   onClick?: (hex: HexData) => void;
 }
 
@@ -20,14 +22,32 @@ const RESOURCE_ICONS: Record<string, string> = {
   arable: "⚘",
 };
 
-function HexTileInner({ hex, selected, onClick }: HexTileProps) {
+const BUILD_ICONS: Record<string, string> = {
+  oil_plant: "🛢",
+  gas_plant: "🔥",
+  coal_plant: "🏭",
+  hydro_plant: "💧",
+  solar_plant: "☀",
+  nuclear_plant: "☢",
+  industrial_complex: "🏗",
+  manufacturing: "⚙",
+  goods_production: "📦",
+  village: "🏘",
+  city: "🏙",
+  green_city: "🌿",
+  farm: "🌾",
+  high_tech_farm: "🧬",
+  airport: "✈",
+  dock: "⚓",
+};
+
+function HexTileInner({ hex, selected, building, onClick }: HexTileProps) {
   const { x, y } = hexToPixel(hex.q, hex.r);
   const points = hexCorners(x, y);
 
   const country = hex.countryId ? COUNTRY_CONFIGS[hex.countryId] : null;
   const isCountryHex = !!country;
 
-  // Country hexes: solid country color. Non-country: terrain color.
   let fillColor: string;
   let strokeColor: string;
   let strokeWidth: number;
@@ -49,20 +69,41 @@ function HexTileInner({ hex, selected, onClick }: HexTileProps) {
     strokeWidth = 2.5;
   }
 
+  if (building) {
+    fillColor = isCountryHex
+      ? country!.color
+      : fillColor;
+  }
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onClick?.(hex);
+  };
+
   return (
     <g
-      onClick={() => onClick?.(hex)}
+      onClick={handleClick}
       style={{ cursor: onClick ? "pointer" : "default" }}
     >
-      {/* Single solid fill — country color or terrain color, never both */}
       <polygon
         points={points}
         fill={fillColor}
         stroke={strokeColor}
         strokeWidth={strokeWidth}
+        opacity={building ? 0.85 : 1}
       />
-      {/* Resource icon */}
-      {hex.resource && (
+      {building ? (
+        <text
+          x={x}
+          y={y + 1}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize={HEX_SIZE * 0.85}
+          pointerEvents="none"
+        >
+          {BUILD_ICONS[building.type] || "🏗"}
+        </text>
+      ) : hex.resource ? (
         <text
           x={x}
           y={y + 1}
@@ -73,6 +114,18 @@ function HexTileInner({ hex, selected, onClick }: HexTileProps) {
           pointerEvents="none"
         >
           {RESOURCE_ICONS[hex.resource] || "?"}
+        </text>
+      ) : null}
+      {building && (
+        <text
+          x={x}
+          y={y + HEX_SIZE * 0.55}
+          textAnchor="middle"
+          fontSize={HEX_SIZE * 0.35}
+          fill="#fff"
+          pointerEvents="none"
+        >
+          T{building.tier}
         </text>
       )}
     </g>

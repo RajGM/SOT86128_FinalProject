@@ -7,24 +7,35 @@ import { HexTile } from "./HexTile";
 import { CountryLabel } from "./CountryLabel";
 import { MapLegend } from "./MapLegend";
 import { countByCountry } from "../../lib/mapGenerator";
+import { useGame } from "../../context/GameContext";
+import { tileKey } from "../../types/game";
+import { ResourcesBar } from "../ui/ResourcesBar";
+import { ActionPanel } from "../ui/ActionPanel";
+import { DashboardModal } from "../ui/DashboardModal";
+import { BuildPanel } from "../ui/BuildPanel";
+import { RouteLines } from "./RouteLines";
+import { hexToTileTags } from "../../types/game";
 
 interface HexMapProps {
   hexes: HexData[];
 }
 
 export function HexMap({ hexes }: HexMapProps) {
+  const {
+    gameState,
+    selectedHex,
+    setSelectedHex,
+  } = useGame();
+
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  const [selectedHex, setSelectedHex] = useState<HexData | null>(null);
 
   const mapDims = useMemo(() => getMapDimensions(MAP_COLS, MAP_ROWS), []);
   const countryCounts = useMemo(() => countByCountry(hexes), [hexes]);
-
   const countryBorders = useMemo(() => computeCountryBorders(hexes), [hexes]);
 
-  // Initial viewbox
   useEffect(() => {
     setViewBox({
       x: -20,
@@ -42,7 +53,6 @@ export function HexMap({ hexes }: HexMapProps) {
       setViewBox((prev) => {
         const newW = prev.w * scaleFactor;
         const newH = prev.h * scaleFactor;
-        // Zoom toward center
         const dx = (prev.w - newW) / 2;
         const dy = (prev.h - newH) / 2;
         return {
@@ -57,10 +67,11 @@ export function HexMap({ hexes }: HexMapProps) {
   );
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button === 0) {
-      setIsPanning(true);
-      setPanStart({ x: e.clientX, y: e.clientY });
-    }
+    if (e.button !== 0) return;
+    const target = e.target as SVGElement;
+    if (target.tagName === "polygon" || target.tagName === "text") return;
+    setIsPanning(true);
+    setPanStart({ x: e.clientX, y: e.clientY });
   }, []);
 
   const handleMouseMove = useCallback(
@@ -87,8 +98,10 @@ export function HexMap({ hexes }: HexMapProps) {
   }, []);
 
   const handleHexClick = useCallback((hex: HexData) => {
-    setSelectedHex((prev) => (prev?.q === hex.q && prev?.r === hex.r ? null : hex));
-  }, []);
+    setSelectedHex(
+      selectedHex?.q === hex.q && selectedHex?.r === hex.r ? null : hex
+    );
+  }, [selectedHex, setSelectedHex]);
 
   const countryIds = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
@@ -115,17 +128,16 @@ export function HexMap({ hexes }: HexMapProps) {
         onWheel={handleWheel}
         style={{ display: "block" }}
       >
-        {/* Render all hex tiles */}
         {hexes.map((hex) => (
           <HexTile
             key={`${hex.q}-${hex.r}`}
             hex={hex}
             selected={selectedHex?.q === hex.q && selectedHex?.r === hex.r}
+            building={gameState.tileBuildings[tileKey(hex.q, hex.r)] ?? null}
             onClick={handleHexClick}
           />
         ))}
 
-        {/* Continuous country outlines */}
         {countryBorders.map(({ countryId, paths }) =>
           paths.map((d, i) => (
             <path
@@ -141,21 +153,29 @@ export function HexMap({ hexes }: HexMapProps) {
           ))
         )}
 
-        {/* Country labels */}
         {countryIds.map((id) => (
           <CountryLabel key={id} countryId={id} hexes={hexes} />
         ))}
+
+        <RouteLines
+          routes={gameState.transportRoutes}
+          highlightedIds={gameState.highlightedRoutes}
+        />
       </svg>
 
-      {/* Legend overlay */}
+      <ResourcesBar />
+
       <MapLegend countryCounts={countryCounts} />
 
-      {/* Selected hex info */}
+      <ActionPanel />
+      <DashboardModal />
+      <BuildPanel />
+
       {selectedHex && (
         <div
           style={{
             position: "absolute",
-            top: 16,
+            top: 100,
             right: 16,
             background: "rgba(0,0,0,0.85)",
             color: "#fff",
@@ -164,7 +184,8 @@ export function HexMap({ hexes }: HexMapProps) {
             fontSize: 12,
             lineHeight: 1.6,
             backdropFilter: "blur(8px)",
-            minWidth: 160,
+            minWidth: 180,
+            zIndex: 10,
           }}
         >
           <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
@@ -178,7 +199,7 @@ export function HexMap({ hexes }: HexMapProps) {
             <span style={{ color: "#999" }}>Country: </span>
             {selectedHex.countryId
               ? COUNTRY_CONFIGS[selectedHex.countryId].name
-              : "None"}
+              : "None (testing OK)"}
           </div>
           {selectedHex.resource && (
             <div>
@@ -188,30 +209,40 @@ export function HexMap({ hexes }: HexMapProps) {
               </span>
             </div>
           )}
+          {hexToTileTags(selectedHex).length > 0 && (
+            <div>
+              <span style={{ color: "#999" }}>Tags: </span>
+              {hexToTileTags(selectedHex).join(", ")}
+            </div>
+          )}
+          {gameState.tileBuildings[tileKey(selectedHex.q, selectedHex.r)] && (
+            <div style={{ marginTop: 6, color: "#22c55e" }}>
+              Built: {gameState.tileBuildings[tileKey(selectedHex.q, selectedHex.r)].type.replace("_", " ")}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Title */}
       <div
         style={{
           position: "absolute",
-          top: 16,
+          top: 56,
           left: "50%",
           transform: "translateX(-50%)",
           background: "rgba(0,0,0,0.7)",
           color: "#fff",
           borderRadius: 8,
-          padding: "8px 20px",
-          fontSize: 16,
+          padding: "6px 16px",
+          fontSize: 14,
           fontWeight: 700,
           letterSpacing: 1,
           backdropFilter: "blur(8px)",
+          zIndex: 5,
         }}
       >
-        Climate Diplomacy — World Map
+        Climate Diplomacy — Testing Mode
       </div>
 
-      {/* Controls hint */}
       <div
         style={{
           position: "absolute",
@@ -219,9 +250,10 @@ export function HexMap({ hexes }: HexMapProps) {
           right: 16,
           color: "rgba(255,255,255,0.4)",
           fontSize: 10,
+          zIndex: 5,
         }}
       >
-        Scroll to zoom · Drag to pan · Click hex for info
+        Scroll to zoom · Drag to pan · Click hex to build
       </div>
     </div>
   );
