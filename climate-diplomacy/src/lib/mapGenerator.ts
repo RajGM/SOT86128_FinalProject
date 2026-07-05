@@ -7,7 +7,8 @@ import { MAP_COLS, MAP_ROWS } from "../config/constants";
  * Layout (equirectangular-ish, 60 cols x 30 rows):
  *   - Rows 0-2: Arctic
  *   - Rows 3-25: Main landmasses
- *   - Rows 26-29: Southern ocean / Antarctic
+ *   - Rows 27-28: Antarctic (arctic)
+ *   - Row 29: Southern ocean
  *
  * Country placement approximates real-world positions:
  *   USA:           cols 3-16,  rows 7-15   (North America)
@@ -196,9 +197,10 @@ function assignTerrain(
   countryId: CountryId | null,
   rand: () => number
 ): TerrainType {
-  // Arctic rows
+  // Arctic rows (north and south)
   if (r <= 2) return "arctic";
-  if (r >= 27) return "ocean";
+  if (r >= 29) return "ocean";
+  if (r >= 27) return "arctic";
 
   // No country assigned — decide ocean vs neutral land
   if (countryId === null) {
@@ -351,100 +353,87 @@ function assignResource(
   if (countryId === null || terrain === "ocean" || terrain === "arctic") return null;
 
   const roll = rand();
-  // Higher resource chance for latam/africa to compensate for forest-heavy terrain
   const resourceThreshold = (countryId === "latam" || countryId === "africa") ? 0.35 : 0.25;
-  if (roll > resourceThreshold) return null;
+
+  if (roll > resourceThreshold) {
+    if (terrain === "agricultural" || terrain === "forest" || terrain === "land") {
+      return rand() < 0.35 ? "mixed" : null;
+    }
+    return null;
+  }
 
   const resourceRoll = rand();
 
   switch (countryId) {
     case "usa":
       if (terrain === "desert" || terrain === "land") {
-        if (resourceRoll < 0.3) return "oil";
-        if (resourceRoll < 0.5) return "coal";
-        if (resourceRoll < 0.7) return "natural_gas";
+        if (resourceRoll < 0.65) return "fuel";
       }
-      if (terrain === "agricultural") return "arable";
-      if (terrain === "coastal") return "wind_potential";
-      if (terrain === "desert") return "solar_potential";
-      return null;
+      if (terrain === "agricultural" || terrain === "forest") return "mixed";
+      if (resourceRoll < 0.2) return "uranium";
+      if (resourceRoll < 0.35) return "rare_earth";
+      return "mixed";
 
     case "eu":
-      if (terrain === "coastal") return resourceRoll < 0.5 ? "wind_potential" : null;
-      if (terrain === "agricultural") return "arable";
-      if (terrain === "mountain") return resourceRoll < 0.3 ? "uranium" : null;
-      return null;
+      if (terrain === "coastal") return resourceRoll < 0.4 ? "mixed" : null;
+      if (terrain === "agricultural" || terrain === "forest") return "mixed";
+      if (terrain === "mountain" && resourceRoll < 0.35) return "uranium";
+      if (terrain === "mountain" && resourceRoll < 0.55) return "rare_earth";
+      return resourceRoll < 0.3 ? "mixed" : null;
 
     case "russia":
-      if (resourceRoll < 0.25) return "oil";
-      if (resourceRoll < 0.45) return "natural_gas";
-      if (resourceRoll < 0.55) return "coal";
+      if (resourceRoll < 0.55) return "fuel";
       if (resourceRoll < 0.65) return "uranium";
-      if (terrain === "forest") return null;
-      return null;
+      if (terrain === "forest") return resourceRoll < 0.8 ? "mixed" : null;
+      return resourceRoll < 0.75 ? "fuel" : null;
 
     case "china":
-      if (resourceRoll < 0.3) return "coal";
-      if (resourceRoll < 0.5) return "rare_earth";
-      if (terrain === "desert") return "solar_potential";
-      if (terrain === "coastal") return "wind_potential";
-      return null;
+      if (resourceRoll < 0.45) return "rare_earth";
+      if (resourceRoll < 0.6) return "fuel";
+      if (terrain === "agricultural") return "mixed";
+      return resourceRoll < 0.75 ? "mixed" : null;
 
     case "india":
-      if (terrain === "agricultural") return "arable";
+      if (terrain === "agricultural" || terrain === "forest") return "mixed";
       if (terrain === "desert" || terrain === "land") {
-        if (resourceRoll < 0.3) return "coal";
-        if (resourceRoll < 0.5) return "solar_potential";
+        if (resourceRoll < 0.4) return "fuel";
       }
-      if (resourceRoll < 0.3) return "rare_earth";
-      return null;
+      if (resourceRoll < 0.35) return "rare_earth";
+      return "mixed";
 
     case "opec":
       if (r <= 10) {
-        // Kazakhstan / Central Asia oil, gas, uranium
-        if (resourceRoll < 0.3) return "oil";
-        if (resourceRoll < 0.55) return "natural_gas";
+        if (resourceRoll < 0.5) return "fuel";
         if (resourceRoll < 0.65) return "uranium";
-        if (terrain === "desert") return "solar_potential";
-        return null;
+        return resourceRoll < 0.8 ? "fuel" : null;
       }
       if (q >= 36 && r >= 14) {
-        // Pakistan
-        if (terrain === "agricultural") return "arable";
-        if (resourceRoll < 0.25) return "natural_gas";
-        return null;
+        if (terrain === "agricultural") return "mixed";
+        if (resourceRoll < 0.35) return "fuel";
+        return "mixed";
       }
-      // Gulf & Middle East
-      if (resourceRoll < 0.45) return "oil";
-      if (resourceRoll < 0.65) return "natural_gas";
-      if (terrain === "desert") return "solar_potential";
+      if (resourceRoll < 0.65) return "fuel";
+      if (terrain === "coastal") return resourceRoll < 0.5 ? "fuel" : "mixed";
       return null;
 
     case "latam":
-      // Oil/gas rich (Venezuela, Brazil), lithium triangle, huge arable
-      if (terrain === "forest") return resourceRoll < 0.3 ? "arable" : null;
+      if (terrain === "forest") return resourceRoll < 0.45 ? "mixed" : null;
       if (terrain === "land" || terrain === "desert") {
-        if (resourceRoll < 0.25) return "oil";
-        if (resourceRoll < 0.4) return "natural_gas";
-        if (resourceRoll < 0.55) return "rare_earth"; // lithium
+        if (resourceRoll < 0.3) return "fuel";
+        if (resourceRoll < 0.5) return "rare_earth";
       }
-      if (terrain === "agricultural") return "arable";
-      if (terrain === "coastal") return "wind_potential";
-      if (terrain === "mountain") return resourceRoll < 0.3 ? "rare_earth" : null;
-      return null;
+      if (terrain === "agricultural") return "mixed";
+      return resourceRoll < 0.4 ? "mixed" : null;
 
     case "africa":
-      // Mineral-rich: rare earth, uranium, cobalt; huge solar potential
-      if (terrain === "desert") return resourceRoll < 0.5 ? "solar_potential" : null;
       if (terrain === "mountain" || terrain === "land") {
-        if (resourceRoll < 0.3) return "rare_earth"; // cobalt, coltan, platinum
-        if (resourceRoll < 0.45) return "uranium"; // Niger, Namibia
-        if (resourceRoll < 0.55) return "coal"; // South Africa
+        if (resourceRoll < 0.35) return "rare_earth";
+        if (resourceRoll < 0.5) return "uranium";
+        if (resourceRoll < 0.6) return "fuel";
       }
-      if (terrain === "forest") return resourceRoll < 0.3 ? "arable" : null;
-      if (terrain === "agricultural") return "arable";
-      if (terrain === "coastal") return resourceRoll < 0.4 ? "oil" : "wind_potential";
-      return null;
+      if (terrain === "forest" || terrain === "agricultural") return "mixed";
+      if (terrain === "coastal") return resourceRoll < 0.45 ? "fuel" : resourceRoll < 0.6 ? "mixed" : null;
+      return resourceRoll < 0.35 ? "mixed" : null;
 
     default:
       return null;

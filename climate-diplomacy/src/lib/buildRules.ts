@@ -1,6 +1,13 @@
 import type { HexData } from "../types/hex";
 import type { BuildDefinition, BuildEffects, BuildType, PlacedBuilding } from "../types/game";
 import { BUILD_BY_ID } from "../config/builds";
+import { createHexLookup, getHexNeighborCoords } from "./hexUtils";
+
+export const DOCK_COASTAL_PLACEMENT_MESSAGE =
+  "Can only be built at coastal tiles adjacent to ocean within region territory";
+
+export const EXTRACTOR_DEPOSIT_PLACEMENT_MESSAGE =
+  "Can only be built on tiles with resource deposits";
 
 const DEFAULT_DEMOLISH_COST_RATIO = 0.25;
 const DEFAULT_DEMOLISH_REFUND_RATIO = 0.35;
@@ -11,76 +18,77 @@ export interface BuildAvailability {
   reason?: string;
 }
 
-function matchesResource(
-  hex: HexData,
-  required?: BuildDefinition["requiredResource"]
-): boolean {
-  if (!required) return true;
-  if (Array.isArray(required)) {
-    return required.some((r) => hex.resource === r);
-  }
-  return hex.resource === required;
+function isOceanNeighbor(hex: HexData | undefined): boolean {
+  return hex?.terrain === "ocean";
 }
 
-function matchesTerrain(
+export function canPlaceDock(
   hex: HexData,
-  required?: BuildDefinition["requiredTerrain"]
-): boolean {
-  if (!required) return true;
-  if (Array.isArray(required)) {
-    return required.some((t) => hex.terrain === t);
+  hexLookup: Map<string, HexData>,
+  testingMode = false
+): BuildAvailability {
+  if (!testingMode && !hex.countryId) {
+    return { available: false, reason: DOCK_COASTAL_PLACEMENT_MESSAGE };
   }
-  return hex.terrain === required;
+
+  if (hex.terrain === "ocean" || hex.terrain === "arctic") {
+    return { available: false, reason: DOCK_COASTAL_PLACEMENT_MESSAGE };
+  }
+
+  const hasOceanNeighbor = getHexNeighborCoords(hex.q, hex.r).some(([nq, nr]) =>
+    isOceanNeighbor(hexLookup.get(`${nq},${nr}`))
+  );
+
+  if (!hasOceanNeighbor) {
+    return { available: false, reason: DOCK_COASTAL_PLACEMENT_MESSAGE };
+  }
+
+  return { available: true };
+}
+
+export function canPlaceExtractor(hex: HexData): BuildAvailability {
+  if (hex.resource === null) {
+    return { available: false, reason: EXTRACTOR_DEPOSIT_PLACEMENT_MESSAGE };
+  }
+  return { available: true };
 }
 
 export function canBuildOnTile(
   hex: HexData,
   build: BuildDefinition,
   existingBuildings: Record<string, PlacedBuilding>,
-  tier: 1 | 2 | 3
+  tier: 1 | 2 | 3,
+  testingMode = false,
+  hexLookup?: Map<string, HexData>
 ): BuildAvailability {
   const key = `${hex.q},${hex.r}`;
   if (existingBuildings[key]) {
     return { available: false, reason: "Tile already has a building" };
   }
-  if (hex.terrain === "ocean" || hex.terrain === "arctic") {
-    return { available: false, reason: "Cannot build on ocean/arctic" };
-  }
 
-  if (build.requiredResource && !matchesResource(hex, build.requiredResource)) {
-    const req = Array.isArray(build.requiredResource)
-      ? build.requiredResource.join(" or ")
-      : build.requiredResource.replace("_", " ");
-    return { available: false, reason: `Requires ${req} tile` };
-  }
-
-  if (build.requiredTerrain && !matchesTerrain(hex, build.requiredTerrain)) {
-    const req = Array.isArray(build.requiredTerrain)
-      ? build.requiredTerrain.join(" or ")
-      : build.requiredTerrain;
-    return { available: false, reason: `Requires ${req} terrain` };
+  if (build.id === "dock") {
+    const lookup = hexLookup ?? createHexLookup([]);
+    const dockAvailability = canPlaceDock(hex, lookup, testingMode);
+    if (!dockAvailability.available) {
+      return dockAvailability;
+    }
+  } else if (build.id === "extractor") {
+    const extractorAvailability = canPlaceExtractor(hex);
+    if (!extractorAvailability.available) {
+      return extractorAvailability;
+    }
+  } else if (!testingMode) {
+    if (!hex.countryId) {
+      return { available: false, reason: "Must be on a country hex" };
+    }
+    if (hex.terrain === "ocean" || hex.terrain === "arctic") {
+      return { available: false, reason: "Cannot build on ocean/arctic" };
+    }
   }
 
   const tierReq = build.tierRequirements?.[tier];
   if (tierReq && tier > 1) {
     return { available: true, reason: `Tier ${tier}: ${tierReq} (advisory)` };
-  }
-
-  // Industrial complex tier 1: any non-ocean (already checked)
-  if (build.id === "manufacturing" && tier >= 2) {
-    const hasMineral = hex.resource === "rare_earth" || hex.resource === "coal";
-    if (!hasMineral) {
-      return { available: false, reason: `Tier ${tier}: requires mineral/rare earth tile or import` };
-    }
-  }
-
-  if (build.id === "industrial_complex" || build.id === "manufacturing") {
-    if (tier === 1) return { available: true };
-  }
-
-  // Goods production needs prior production building in region - advisory for MVP
-  if (build.id === "goods_production" && tier === 1) {
-    return { available: true, reason: "Requires manufacturing or industrial complex (advisory)" };
   }
 
   return { available: true };
@@ -189,13 +197,16 @@ export function getBuildDefinition(type: BuildType): BuildDefinition {
 
 export function getAvailableBuildsForTile(
   hex: HexData,
-  existingBuildings: Record<string, PlacedBuilding>
+  existingBuildings: Record<string, PlacedBuilding>,
+  testingMode = false,
+  hexLookup?: Map<string, HexData>
 ): { build: BuildDefinition; tier: 1 | 2 | 3; availability: BuildAvailability }[] {
+  const lookup = hexLookup ?? createHexLookup([]);
   const results: { build: BuildDefinition; tier: 1 | 2 | 3; availability: BuildAvailability }[] = [];
   for (const build of Object.values(BUILD_BY_ID)) {
     for (const tier of [1, 2, 3] as const) {
-      const availability = canBuildOnTile(hex, build, existingBuildings, tier);
-      if (availability.available) {
+      const availability = canBuildOnTile(hex, build, existingBuildings, tier, testingMode, lookup);
+      if (availability.available || build.id === "dock" || build.id === "extractor") {
         results.push({ build, tier, availability });
       }
     }

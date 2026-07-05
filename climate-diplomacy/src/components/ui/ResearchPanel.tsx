@@ -1,10 +1,16 @@
 import { useGame } from "../../context/GameContext";
-import { getResearchCost, getResearchBonus, getBreakthroughDescription, LICENSING_MODELS } from "../../lib/research";
+import {
+  getResearchCost,
+  getResearchBonus,
+  getBreakthroughDescription,
+  LICENSING_MODELS,
+  EXTRACTION_RESEARCH,
+} from "../../lib/research";
 import { BUILD_DEFINITIONS } from "../../config/builds";
 import type { BuildCategory } from "../../types/game";
-import { COUNTRY_CONFIGS } from "../../types/hex";
+import { COUNTRY_CONFIGS, RESOURCE_ICONS, RESOURCE_LABELS } from "../../types/hex";
 
-const CATEGORIES: BuildCategory[] = ["energy", "production", "population", "food", "transport"];
+const CATEGORIES: BuildCategory[] = ["energy", "production", "population", "food", "transport", "extraction"];
 
 export function ResearchPanel() {
   const {
@@ -14,6 +20,7 @@ export function ResearchPanel() {
     joinCombinedResearch,
     purchaseResearchLicense,
     applyIncrementalResearch,
+    applyExtractionResearchUnlock,
   } = useGame();
 
   const region = gameState.regions[viewCountry];
@@ -21,11 +28,46 @@ export function ResearchPanel() {
 
   return (
     <div>
+      <div className="section-title">Extraction Research</div>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginBottom: 8 }}>
+        Unlock deposit types before extractors can harvest them each cycle. Bonus yield on matching deposit tiles.
+      </p>
+      {EXTRACTION_RESEARCH.map((research) => {
+        const unlocked = region.extractionUnlocks[research.deposit] === true;
+        return (
+          <div key={research.deposit} className="card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 600 }}>
+                {RESOURCE_ICONS[research.deposit]} {research.name}
+              </span>
+              {unlocked ? (
+                <span style={{ color: "#22c55e", fontSize: 11 }}>Unlocked</span>
+              ) : (
+                <span style={{ fontSize: 11 }}>{research.cost} money</span>
+              )}
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.5)", marginTop: 4, fontSize: 11 }}>
+              {research.description}
+            </div>
+            {!unlocked && (
+              <button
+                className="overlay-btn"
+                style={{ marginTop: 6 }}
+                disabled={region.money < research.cost}
+                onClick={() => applyExtractionResearchUnlock(research.deposit)}
+              >
+                Research {RESOURCE_LABELS[research.deposit]} Extraction
+              </button>
+            )}
+          </div>
+        );
+      })}
+
       <div className="section-title">Post-Tier-3 Incremental Research</div>
       <p style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginBottom: 8 }}>
         After maxing a category at Tier 3, unlock infinite +5% efficiency upgrades. Cost scales linearly (level × base).
       </p>
-      {CATEGORIES.map((cat) => {
+      {CATEGORIES.filter((c) => c !== "extraction").map((cat) => {
         const level = region.researchLevels[cat] ?? 0;
         const cost = getResearchCost(cat, level);
         const bonus = getResearchBonus(level);
@@ -139,7 +181,7 @@ export function ResearchPanel() {
 
       <div className="section-title">Build Catalog Reference</div>
       <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
-        {BUILD_DEFINITIONS.length} build types across energy, production, population, food, and transport.
+        {BUILD_DEFINITIONS.length} build types across energy, production, population, food, transport, and extraction.
       </div>
     </div>
   );

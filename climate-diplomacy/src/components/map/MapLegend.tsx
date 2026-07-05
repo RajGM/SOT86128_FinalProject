@@ -1,4 +1,4 @@
-import { TERRAIN_COLORS, COUNTRY_CONFIGS, CountryId } from "../../types/hex";
+import { COUNTRY_CONFIGS, CountryId, RESOURCE_DEPOSITS, RESOURCE_LABELS, RESOURCE_ICONS } from "../../types/hex";
 
 interface MapLegendProps {
   countryCounts: Record<string, number>;
@@ -32,27 +32,11 @@ export function MapLegend({ countryCounts }: MapLegendProps) {
         </div>
       ))}
 
-      <div style={{ fontWeight: 700, marginTop: 10, marginBottom: 6, fontSize: 12 }}>Terrain</div>
-      {(["ocean", "land", "forest", "desert", "mountain", "agricultural", "coastal", "arctic"] as const).map((t) => (
-        <div key={t} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{
-            width: 10, height: 10, borderRadius: 2,
-            backgroundColor: TERRAIN_COLORS[t],
-            display: "inline-block", flexShrink: 0,
-            border: "1px solid rgba(255,255,255,0.2)",
-          }} />
-          <span style={{ textTransform: "capitalize" }}>{t}</span>
-        </div>
-      ))}
-
       <div style={{ fontWeight: 700, marginTop: 10, marginBottom: 6, fontSize: 12 }}>Resources</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 8px" }}>
-        {[
-          ["●", "Oil"], ["◆", "Coal"], ["◈", "Gas"], ["★", "Rare Earth"],
-          ["☢", "Uranium"], ["☀", "Solar"], ["⌁", "Wind"], ["⚘", "Arable"],
-        ].map(([icon, name]) => (
-          <div key={name} style={{ display: "flex", gap: 4 }}>
-            <span>{icon}</span><span>{name}</span>
+        {RESOURCE_DEPOSITS.map((dep) => (
+          <div key={dep} style={{ display: "flex", gap: 4 }}>
+            <span>{RESOURCE_ICONS[dep]}</span><span>{RESOURCE_LABELS[dep]}</span>
           </div>
         ))}
       </div>

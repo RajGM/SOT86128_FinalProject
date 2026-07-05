@@ -229,5 +229,5 @@ export function formatRoutePath(path: CountryId[]): string {
 export function infraLabel(rt: RouteType): string {
   if (rt === "air") return "Airport";
   if (rt === "sea") return "Dock";
-  return "Transport Center";
+  return "Land Transport Center";
 }

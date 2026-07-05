@@ -10,15 +10,40 @@ export type TerrainType =
 
 export type CountryId = "usa" | "eu" | "russia" | "china" | "india" | "opec" | "latam" | "africa";
 
+/** Map deposit categories — solar/wind/hydro are build-anywhere plants, not deposits. */
 export type ResourceDeposit =
-  | "oil"
-  | "coal"
-  | "natural_gas"
+  | "fuel"
   | "rare_earth"
   | "uranium"
-  | "solar_potential"
-  | "wind_potential"
-  | "arable";
+  | "mixed";
+
+export const RESOURCE_DEPOSITS: ResourceDeposit[] = [
+  "fuel",
+  "rare_earth",
+  "uranium",
+  "mixed",
+];
+
+export const RESOURCE_LABELS: Record<ResourceDeposit, string> = {
+  fuel: "Fuel",
+  rare_earth: "Rare Earth",
+  uranium: "Uranium",
+  mixed: "Mixed/Land",
+};
+
+export const RESOURCE_ICONS: Record<ResourceDeposit, string> = {
+  fuel: "●",
+  rare_earth: "★",
+  uranium: "☢",
+  mixed: "⚘",
+};
+
+export const RESOURCE_COLORS: Record<ResourceDeposit, string> = {
+  fuel: "#1c1917",
+  rare_earth: "#9333ea",
+  uranium: "#84cc16",
+  mixed: "#65a30d",
+};
 
 export interface HexData {
   q: number;
@@ -85,3 +110,7 @@ export const COUNTRY_CONFIGS: Record<CountryId, CountryConfig> = {
     hexCount: 65, centerQ: 27, centerR: 18, radiusQ: 4, radiusR: 5,
   },
 };
+
+export function emptyDepositCounts(): Record<ResourceDeposit, number> {
+  return { fuel: 0, rare_earth: 0, uranium: 0, mixed: 0 };
+}

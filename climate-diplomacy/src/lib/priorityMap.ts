@@ -70,7 +70,7 @@ export function generateSuggestions(
     suggestions.push({
       id: "energy-shortage",
       priority: 1,
-      text: `Your energy shortage threatens industry. Recommended: build gas plant, import energy from OPEC+, or invest in solar if you have a solar tile.`,
+      text: `Your energy shortage threatens industry. Recommended: build a fossil or renewable plant, import energy from OPEC+, or trade for fuel deposits.`,
     });
   }
 
@@ -102,7 +102,7 @@ export function generateSuggestions(
     suggestions.push({
       id: "coal-agenda",
       priority: 5,
-      text: `A planned coal plant improves energy but lowers happiness because your agenda favors clean transition.`,
+      text: `A planned fuel plant improves energy but lowers happiness because your agenda favors clean transition.`,
     });
   }
 

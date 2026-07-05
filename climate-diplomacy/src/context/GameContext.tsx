@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
 import type { CountryId, HexData } from "../types/hex";
 import type {
   GameState,
@@ -8,7 +8,7 @@ import type {
   TradeMode,
   TransitFeeModel,
 } from "../types/game";
-import { createInitialGameState, getRegionForHex, applyEffectsToRegion, co2TemperatureDelta, processCycle } from "../lib/gameState";
+import { createInitialGameState, getRegionForHex, applyEffectsToRegion, co2TemperatureDelta, processCycle, applyTradeTransfer } from "../lib/gameState";
 import {
   createPlacedBuilding,
   getBuildCost,
@@ -20,7 +20,9 @@ import {
   canUpgradeTier,
   canPostTier3Upgrade,
   getPostTier3UpgradeCost,
+  canBuildOnTile,
 } from "../lib/buildRules";
+import { createHexLookup } from "../lib/hexUtils";
 import {
   createTradeAgreement,
   createTransportRoute,
@@ -28,8 +30,9 @@ import {
   createTransitAgreement,
 } from "../lib/tradeRules";
 import { findRouteOptions, type RouteOption } from "../lib/routeDetection";
-import { applyResearchUpgrade } from "../lib/research";
+import { applyResearchUpgrade, applyExtractionResearch } from "../lib/research";
 import type { BuildCategory } from "../types/game";
+import type { ResourceDeposit } from "../types/hex";
 import { tileKey } from "../types/game";
 import { BUILD_BY_ID } from "../config/builds";
 
@@ -59,6 +62,7 @@ interface GameContextValue {
   joinCombinedResearch: (projectId: string, country: CountryId, amount: number) => void;
   purchaseResearchLicense: (licenseId: string, buyer: CountryId) => void;
   applyIncrementalResearch: (category: BuildCategory) => void;
+  applyExtractionResearchUnlock: (deposit: ResourceDeposit) => void;
   respondTransitRequest: (requestId: string, feeModel: TransitFeeModel, feeAmount: number, accept: boolean) => void;
   cancelTransit: (agreementId: string) => void;
   acceptTransitTerms: (agreementId: string) => void;
@@ -70,7 +74,8 @@ interface GameContextValue {
 const GameContext = createContext<GameContextValue | null>(null);
 
 export function GameProvider({ hexes, children }: { hexes: HexData[]; children: ReactNode }) {
-  const [gameState, setGameState] = useState<GameState>(createInitialGameState);
+  const [gameState, setGameState] = useState<GameState>(() => createInitialGameState(hexes));
+  const hexLookup = useMemo(() => createHexLookup(hexes), [hexes]);
   const [selectedHex, setSelectedHex] = useState<HexData | null>(null);
   const [viewCountry, setViewCountry] = useState<CountryId>("usa");
   const [resourcesExpanded, setResourcesExpanded] = useState(false);
@@ -82,20 +87,39 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
     setResourcesExpanded((v) => !v);
   }, []);
 
+  const resolveRegionId = useCallback(
+    (hex: HexData) =>
+      gameState.testingMode && !hex.countryId ? viewCountry : getRegionForHex(hex.countryId),
+    [gameState.testingMode, viewCountry]
+  );
+
   const placeBuild = useCallback(
     (type: BuildType, tier: 1 | 2 | 3) => {
       if (!selectedHex) return;
       const build = getBuildDefinition(type);
       const cost = getBuildCost(build, tier);
       const key = tileKey(selectedHex.q, selectedHex.r);
-      const regionId = getRegionForHex(selectedHex.countryId);
+      const regionId = resolveRegionId(selectedHex);
       const effects = build.effectsByTier[tier];
 
       setGameState((prev) => {
         const region = prev.regions[regionId];
         if (region.money < cost || prev.tileBuildings[key]) return prev;
 
+        const placement = canBuildOnTile(
+          selectedHex,
+          build,
+          prev.tileBuildings,
+          tier,
+          prev.testingMode,
+          hexLookup
+        );
+        if (!placement.available) return prev;
+
         const placed = createPlacedBuilding(type, tier, selectedHex);
+        if (prev.testingMode && !selectedHex.countryId) {
+          placed.countryId = regionId;
+        }
         return {
           ...prev,
           tileBuildings: { ...prev.tileBuildings, [key]: placed },
@@ -110,13 +134,13 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         };
       });
     },
-    [selectedHex]
+    [selectedHex, resolveRegionId, hexLookup]
   );
 
   const demolishBuild = useCallback(() => {
     if (!selectedHex) return;
     const key = tileKey(selectedHex.q, selectedHex.r);
-    const regionId = getRegionForHex(selectedHex.countryId);
+    const regionId = resolveRegionId(selectedHex);
 
     setGameState((prev) => {
       const existing = prev.tileBuildings[key];
@@ -157,12 +181,12 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         globalTemperature: prev.globalTemperature + co2TemperatureDelta(reversed.co2),
       };
     });
-  }, [selectedHex]);
+  }, [selectedHex, resolveRegionId]);
 
   const upgradeBuild = useCallback(() => {
     if (!selectedHex) return;
     const key = tileKey(selectedHex.q, selectedHex.r);
-    const regionId = getRegionForHex(selectedHex.countryId);
+    const regionId = resolveRegionId(selectedHex);
 
     setGameState((prev) => {
       const existing = prev.tileBuildings[key];
@@ -194,12 +218,12 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         globalTemperature: prev.globalTemperature + co2TemperatureDelta(delta.co2),
       };
     });
-  }, [selectedHex]);
+  }, [selectedHex, resolveRegionId]);
 
   const postTier3Upgrade = useCallback(() => {
     if (!selectedHex) return;
     const key = tileKey(selectedHex.q, selectedHex.r);
-    const regionId = getRegionForHex(selectedHex.countryId);
+    const regionId = resolveRegionId(selectedHex);
 
     setGameState((prev) => {
       const existing = prev.tileBuildings[key];
@@ -223,7 +247,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         },
       };
     });
-  }, [selectedHex]);
+  }, [selectedHex, resolveRegionId]);
 
   // Route system — separate from trades
   const getRouteOptions = useCallback(
@@ -264,22 +288,20 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           const co2 = route.emissionsPerCycle;
           const fromR = prev.regions[from];
           const toR = prev.regions[to];
+          const transferred = applyTradeTransfer(fromR, toR, item, amount);
+          if (!transferred) return prev;
+
+          const fromWithCo2 = co2 > 0
+            ? { ...transferred.from, co2: transferred.from.co2 + co2 }
+            : transferred.from;
+
           return {
             ...prev,
             tradeAgreements: [...prev.tradeAgreements, agreement],
             regions: {
               ...prev.regions,
-              [from]: applyEffectsToRegion(fromR, {
-                money: item === "money" ? -amount : 0,
-                energy: item === "energy" ? -amount : 0,
-                food: item === "food" ? -amount : 0,
-                co2: co2 > 0 ? co2 : undefined,
-              }),
-              [to]: applyEffectsToRegion(toR, {
-                money: item === "money" ? amount : 0,
-                energy: item === "energy" ? amount : 0,
-                food: item === "food" ? amount : 0,
-              }),
+              [from]: fromWithCo2,
+              [to]: transferred.to,
             },
             globalTemperature: prev.globalTemperature + co2TemperatureDelta(co2),
           };
@@ -410,9 +432,18 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
     });
   }, []);
 
+  const applyExtractionResearchUnlock = useCallback((deposit: ResourceDeposit) => {
+    setGameState((prev) => {
+      const region = prev.regions[viewCountry];
+      const result = applyExtractionResearch(region, deposit);
+      if (!result) return prev;
+      return { ...prev, regions: { ...prev.regions, [viewCountry]: result.region } };
+    });
+  }, [viewCountry]);
+
   const advanceCycle = useCallback(() => {
-    setGameState((prev) => processCycle(prev));
-  }, []);
+    setGameState((prev) => processCycle(prev, hexes));
+  }, [hexes]);
 
   const highlightFacilityRoutes = useCallback((countryId: CountryId) => {
     setGameState((prev) => {
@@ -551,6 +582,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         joinCombinedResearch,
         purchaseResearchLicense,
         applyIncrementalResearch,
+        applyExtractionResearchUnlock,
         advanceCycle,
         respondTransitRequest,
         cancelTransit,

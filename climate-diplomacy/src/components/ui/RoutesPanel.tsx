@@ -77,7 +77,7 @@ export function RoutesPanel() {
         <div style={{ fontSize: 11, lineHeight: 1.8 }}>
           <div>Airports: {myBuildings.filter((b) => b.type === "airport").length} ({usedCapacity("airport")}/{totalCapacity("airport")} routes)</div>
           <div>Docks: {myBuildings.filter((b) => b.type === "dock").length} ({usedCapacity("dock")}/{totalCapacity("dock")} routes)</div>
-          <div>Transport Centers: {myBuildings.filter((b) => b.type === "transport_center").length} ({usedCapacity("transport_center")}/{totalCapacity("transport_center")} routes)</div>
+          <div>Land Transport Centers: {myBuildings.filter((b) => b.type === "transport_center").length} ({usedCapacity("transport_center")}/{totalCapacity("transport_center")} routes)</div>
         </div>
       </div>
 

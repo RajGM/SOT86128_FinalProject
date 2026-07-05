@@ -104,7 +104,8 @@ export function TradePanel() {
         const route = gameState.transportRoutes.find((r) => r.id === a.routeId);
         return (
           <div key={a.id} className="card" style={{ opacity: a.active ? 1 : 0.5 }}>
-            {COUNTRY_CONFIGS[a.from].name} → {COUNTRY_CONFIGS[a.to].name}: {a.item} ({a.amount})
+            {COUNTRY_CONFIGS[a.from].name} → {COUNTRY_CONFIGS[a.to].name}:{" "}
+            {TRADE_ITEMS.find((t) => t.id === a.item)?.label ?? a.item} ({a.amount})
             {route && ` via ${route.routeType}`}
             {a.tradeMode === "continuous" ? " · continuous" : ""}
             {!a.active && " · HALTED"}

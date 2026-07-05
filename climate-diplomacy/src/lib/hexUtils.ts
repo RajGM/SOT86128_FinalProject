@@ -1,4 +1,36 @@
 import { HEX_SIZE } from "../config/constants";
+import type { HexData } from "../types/hex";
+
+const NEIGHBOR_DIRS_EVEN: [number, number][] = [
+  [0, -1],
+  [1, 0],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
+];
+
+const NEIGHBOR_DIRS_ODD: [number, number][] = [
+  [1, -1],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+];
+
+export function getHexNeighborCoords(q: number, r: number): [number, number][] {
+  const dirs = r % 2 === 0 ? NEIGHBOR_DIRS_EVEN : NEIGHBOR_DIRS_ODD;
+  return dirs.map(([dq, dr]) => [q + dq, r + dr] as [number, number]);
+}
+
+export function createHexLookup(hexes: HexData[]): Map<string, HexData> {
+  const lookup = new Map<string, HexData>();
+  for (const hex of hexes) {
+    lookup.set(`${hex.q},${hex.r}`, hex);
+  }
+  return lookup;
+}
 
 /**
  * Convert offset coordinates (q, r) to pixel position for flat-top hexagons.

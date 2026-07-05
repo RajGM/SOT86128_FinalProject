@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { HexData, TERRAIN_COLORS, COUNTRY_CONFIGS } from "../../types/hex";
+import { HexData, TERRAIN_COLORS, COUNTRY_CONFIGS, RESOURCE_ICONS } from "../../types/hex";
 import { hexToPixel, hexCorners } from "../../lib/hexUtils";
 import { HEX_SIZE } from "../../config/constants";
 import type { PlacedBuilding } from "../../types/game";
@@ -11,34 +11,22 @@ interface HexTileProps {
   onClick?: (hex: HexData) => void;
 }
 
-const RESOURCE_ICONS: Record<string, string> = {
-  oil: "●",
-  coal: "◆",
-  natural_gas: "◈",
-  rare_earth: "★",
-  uranium: "☢",
-  solar_potential: "☀",
-  wind_potential: "⌁",
-  arable: "⚘",
-};
-
 const BUILD_ICONS: Record<string, string> = {
   oil_plant: "🛢",
   gas_plant: "🔥",
   coal_plant: "🏭",
   hydro_plant: "💧",
   solar_plant: "☀",
+  wind_plant: "🌬",
   nuclear_plant: "☢",
   industrial_complex: "🏗",
-  manufacturing: "⚙",
-  goods_production: "📦",
   village: "🏘",
   city: "🏙",
-  green_city: "🌿",
   farm: "🌾",
-  high_tech_farm: "🧬",
   airport: "✈",
   dock: "⚓",
+  transport_center: "🚛",
+  extractor: "⛏",
 };
 
 function HexTileInner({ hex, selected, building, onClick }: HexTileProps) {

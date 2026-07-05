@@ -1,3 +1,5 @@
+import type { ResourceDeposit } from "../types/hex";
+import { RESOURCE_LABELS } from "../types/hex";
 import type { BuildCategory, BuildType, RegionState } from "../types/game";
 import { BUILD_BY_ID } from "../config/builds";
 
@@ -35,6 +37,70 @@ export function applyResearchUpgrade(
     cost,
     newLevel: currentLevel + 1,
   };
+}
+
+export interface ExtractionResearchDef {
+  deposit: ResourceDeposit;
+  name: string;
+  description: string;
+  cost: number;
+}
+
+export const EXTRACTION_RESEARCH: ExtractionResearchDef[] = [
+  {
+    deposit: "fuel",
+    name: "Fuel Extraction",
+    description: "Unlock extractors to harvest oil, gas, and coal deposits.",
+    cost: 80,
+  },
+  {
+    deposit: "uranium",
+    name: "Uranium Extraction",
+    description: "Unlock extractors to harvest uranium for nuclear fuel.",
+    cost: 120,
+  },
+  {
+    deposit: "rare_earth",
+    name: "Rare Earth Extraction",
+    description: "Unlock extractors to harvest rare earth minerals for industry.",
+    cost: 100,
+  },
+  {
+    deposit: "mixed",
+    name: "Mixed Resource Extraction",
+    description: "Unlock extractors to harvest arable land and general resources.",
+    cost: 60,
+  },
+];
+
+export function isExtractionUnlocked(
+  region: RegionState,
+  deposit: ResourceDeposit
+): boolean {
+  return region.extractionUnlocks[deposit] === true;
+}
+
+export function applyExtractionResearch(
+  region: RegionState,
+  deposit: ResourceDeposit
+): { region: RegionState; cost: number } | null {
+  if (region.extractionUnlocks[deposit]) return null;
+  const def = EXTRACTION_RESEARCH.find((r) => r.deposit === deposit);
+  if (!def || region.money < def.cost) return null;
+
+  return {
+    region: {
+      ...region,
+      money: region.money - def.cost,
+      extractionUnlocks: { ...region.extractionUnlocks, [deposit]: true },
+    },
+    cost: def.cost,
+  };
+}
+
+export function getExtractionResearchLabel(deposit: ResourceDeposit): string {
+  return EXTRACTION_RESEARCH.find((r) => r.deposit === deposit)?.name
+    ?? `${RESOURCE_LABELS[deposit]} Extraction`;
 }
 
 export function getBreakthroughDescription(name: string): string {

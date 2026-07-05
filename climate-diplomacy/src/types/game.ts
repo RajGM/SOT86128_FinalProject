@@ -1,30 +1,30 @@
 import type { CountryId, HexData, ResourceDeposit, TerrainType } from "./hex";
+import { RESOURCE_LABELS } from "./hex";
 
 export type BuildCategory =
   | "energy"
   | "production"
   | "population"
   | "food"
-  | "transport";
+  | "transport"
+  | "extraction";
 
 export type BuildType =
   | "oil_plant"
   | "gas_plant"
   | "coal_plant"
-  | "hydro_plant"
-  | "solar_plant"
   | "nuclear_plant"
+  | "solar_plant"
+  | "wind_plant"
+  | "hydro_plant"
   | "industrial_complex"
-  | "manufacturing"
-  | "goods_production"
   | "village"
   | "city"
-  | "green_city"
   | "farm"
-  | "high_tech_farm"
   | "airport"
   | "dock"
-  | "transport_center";
+  | "transport_center"
+  | "extractor";
 
 export type InfraType = "airport" | "dock" | "transport_center";
 
@@ -32,8 +32,10 @@ export type TradeItem =
   | "money"
   | "energy"
   | "food"
-  | "fossil_fuel"
-  | "minerals"
+  | "fuel"
+  | "rare_earth"
+  | "uranium"
+  | "mixed"
   | "technology"
   | "goods"
   | "transit_permission"
@@ -68,8 +70,6 @@ export interface BuildDefinition {
   name: string;
   category: BuildCategory;
   description: string;
-  requiredResource?: ResourceDeposit | ResourceDeposit[];
-  requiredTerrain?: TerrainType | TerrainType[];
   tierRequirements?: Partial<Record<1 | 2 | 3, string>>;
   baseCost: number;
   /** Fraction of placed cost charged to demolish (default 0.25). */
@@ -181,7 +181,11 @@ export interface RegionState {
   co2: number;
   technology: number;
   goods: number;
+  /** Tradeable map deposit stocks (initialized from tile counts). */
+  deposits: Record<ResourceDeposit, number>;
   researchLevels: Partial<Record<BuildCategory, number>>;
+  /** Research unlocks for extractor deposit types. */
+  extractionUnlocks: Partial<Record<ResourceDeposit, boolean>>;
   breakthroughs: string[];
   relations: Partial<Record<CountryId, number>>;
 }
@@ -280,18 +284,7 @@ export function tileKey(q: number, r: number): string {
 export function hexToTileTags(hex: HexData): string[] {
   const tags: string[] = [];
   if (hex.resource) {
-    const map: Partial<Record<ResourceDeposit, string>> = {
-      oil: "Oil",
-      natural_gas: "Gas",
-      coal: "Coal",
-      solar_potential: "Solar",
-      wind_potential: "Wind",
-      uranium: "Uranium/Nuclear",
-      arable: "Arable",
-      rare_earth: "Mineral/Rare Earth",
-    };
-    const tag = map[hex.resource];
-    if (tag) tags.push(tag);
+    tags.push(RESOURCE_LABELS[hex.resource]);
   }
   if (hex.terrain === "coastal") tags.push("Coastal");
   if (hex.terrain === "agricultural" || hex.terrain === "land") tags.push("Urban/Workforce");

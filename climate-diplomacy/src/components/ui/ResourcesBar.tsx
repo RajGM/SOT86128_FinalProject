@@ -1,10 +1,16 @@
 import { useMemo } from "react";
 import { useGame } from "../../context/GameContext";
-import { aggregateResources } from "../../lib/gameState";
-import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
+import { aggregateResources, aggregateDeposits } from "../../lib/gameState";
+import {
+  COUNTRY_CONFIGS,
+  RESOURCE_DEPOSITS,
+  RESOURCE_LABELS,
+  RESOURCE_ICONS,
+  type CountryId,
+} from "../../types/hex";
 import "./overlay.css";
 
-const RESOURCE_LABELS: { key: keyof ReturnType<typeof aggregateResources>; label: string; unit?: string }[] = [
+const RESOURCE_LABELS_LIST: { key: keyof ReturnType<typeof aggregateResources>; label: string; unit?: string }[] = [
   { key: "money", label: "Money" },
   { key: "energy", label: "Energy" },
   { key: "food", label: "Food" },
@@ -23,6 +29,11 @@ export function ResourcesBar() {
     [gameState.regions]
   );
 
+  const depositTotals = useMemo(
+    () => aggregateDeposits(gameState.regions),
+    [gameState.regions]
+  );
+
   const countryIds = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
   return (
@@ -35,12 +46,18 @@ export function ResourcesBar() {
         <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginRight: 4 }}>
           {resourcesExpanded ? "▼" : "▶"} World Totals
         </span>
-        {RESOURCE_LABELS.map(({ key, label, unit }) => (
+        {RESOURCE_LABELS_LIST.map(({ key, label, unit }) => (
           <div key={key} className="resource-chip">
             <span className="label">{label}</span>
             <span className="value">
               {Math.round(totals[key])}{unit ?? ""}
             </span>
+          </div>
+        ))}
+        {RESOURCE_DEPOSITS.map((dep) => (
+          <div key={dep} className="resource-chip">
+            <span className="label">{RESOURCE_ICONS[dep]} {RESOURCE_LABELS[dep]}</span>
+            <span className="value">{depositTotals[dep]}</span>
           </div>
         ))}
         <div className="resource-chip" style={{ marginLeft: "auto" }}>
@@ -82,9 +99,17 @@ export function ResourcesBar() {
                 >
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>{cfg.name}</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px", color: "rgba(255,255,255,0.7)" }}>
-                    {RESOURCE_LABELS.map(({ key, label, unit }) => (
+                    {RESOURCE_LABELS_LIST.map(({ key, label, unit }) => (
                       <span key={key}>
                         {label}: <strong style={{ color: "#fff" }}>{Math.round(r[key])}{unit ?? ""}</strong>
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexWrap: "wrap", gap: "4px 10px", color: "rgba(255,255,255,0.6)" }}>
+                    {RESOURCE_DEPOSITS.map((dep) => (
+                      <span key={dep}>
+                        {RESOURCE_ICONS[dep]} {RESOURCE_LABELS[dep]}:{" "}
+                        <strong style={{ color: "#fff" }}>{r.deposits[dep]}</strong>
                       </span>
                     ))}
                   </div>
