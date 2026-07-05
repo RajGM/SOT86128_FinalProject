@@ -18,7 +18,7 @@ export function ActionPanel() {
         className={`overlay-btn ${dashboardOpen ? "active" : ""}`}
         onClick={() => setDashboardOpen(!dashboardOpen)}
       >
-        Actions — Research / Diplomacy / Trade / Routes
+        Actions — Technology / Diplomacy / Trade / Routes
       </button>
       {selectedHex && (
         <button

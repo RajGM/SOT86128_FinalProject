@@ -5,18 +5,32 @@ import type {
   GameState,
   RegionState,
   ResourceTotals,
-  BreakthroughProposal,
-  CombinedResearchProject,
   BuildEffects,
   TradeItem,
+  InfraType,
 } from "../types/game";
+import { INFRA_UPKEEP } from "../types/game";
 import { REGION_PROFILES } from "../config/regionProfiles";
+import { BUILD_BY_ID } from "../config/builds";
+import {
+  computeIdleBuildingIds,
+  computeMaterialShortageIdleIds,
+  consumePlantMaterials,
+  getExtractorYield,
+  computeBuildingYields,
+  computeBuildingCosts,
+  computeFarmClimateFoodAdjustment,
+} from "./buildEconomics";
+import {
+  applyHappinessUpdate,
+  applyPopulationEffects,
+  clampResourceFloors,
+  computePerCapitaConsumption,
+} from "./populationMechanics";
 
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
-const DEPOSIT_TRADE_ITEMS: ResourceDeposit[] = [
-  "fuel", "rare_earth", "uranium", "mixed",
-];
+const DEPOSIT_TRADE_ITEMS: ResourceDeposit[] = ["fuel", "rare_earth", "uranium"];
 
 export function isDepositTradeItem(item: TradeItem): item is ResourceDeposit {
   return (DEPOSIT_TRADE_ITEMS as string[]).includes(item);
@@ -49,7 +63,7 @@ export function aggregateDeposits(
   return totals;
 }
 
-function createRegionState(id: CountryId, deposits: Record<ResourceDeposit, number>): RegionState {
+function createRegionState(id: CountryId): RegionState {
   const profile = REGION_PROFILES[id];
   const relations: Partial<Record<CountryId, number>> = {};
   for (const other of ALL_COUNTRIES) {
@@ -57,7 +71,7 @@ function createRegionState(id: CountryId, deposits: Record<ResourceDeposit, numb
   }
   return {
     ...profile.startingResources,
-    deposits: { ...deposits },
+    deposits: emptyDepositCounts(),
     researchLevels: {},
     extractionUnlocks: {},
     breakthroughs: [],
@@ -65,49 +79,11 @@ function createRegionState(id: CountryId, deposits: Record<ResourceDeposit, numb
   };
 }
 
-function pickRandomPartners(exclude: CountryId[], count: number, seed: number): CountryId[] {
-  const pool = ALL_COUNTRIES.filter((c) => !exclude.includes(c));
-  const result: CountryId[] = [];
-  let s = seed;
-  for (let i = 0; i < count && pool.length > 0; i++) {
-    s = (s * 16807) % 2147483647;
-    const idx = s % pool.length;
-    result.push(pool.splice(idx, 1)[0]);
-  }
-  return result;
-}
-
-export function createInitialGameState(hexes: HexData[] = []): GameState {
-  const depositCounts = countDepositsByCountry(hexes);
+export function createInitialGameState(_hexes: HexData[] = []): GameState {
   const regions = {} as Record<CountryId, RegionState>;
   for (const id of ALL_COUNTRIES) {
-    regions[id] = createRegionState(id, depositCounts[id]);
+    regions[id] = createRegionState(id);
   }
-
-  const optionalPartners = pickRandomPartners(["usa", "eu"], 2, 42);
-
-  const breakthroughProposal: BreakthroughProposal = {
-    id: "bt-1",
-    name: "Carbon Capture Retrofit",
-    requiredParticipants: ["usa", "eu", ...optionalPartners],
-    optionalParticipants: [],
-    agreed: [],
-    refused: [],
-    cost: 200,
-  };
-
-  const combinedProjects: CombinedResearchProject[] = [
-    {
-      id: "cr-1",
-      name: "Advanced Solar Storage",
-      goal: "Grid-scale battery integration for solar regions",
-      participants: ["eu", "usa", "india"],
-      contributions: { eu: 80, usa: 70, india: 30 },
-      progress: 120,
-      target: 200,
-      complete: false,
-    },
-  ];
 
   return {
     regions,
@@ -117,18 +93,9 @@ export function createInitialGameState(hexes: HexData[] = []): GameState {
     transitAgreements: [],
     transitRequests: [],
     highlightedRoutes: [],
-    breakthroughProposal,
-    combinedProjects,
-    researchLicenses: [
-      {
-        id: "lic-1",
-        breakthrough: "Fusion Energy (preview)",
-        seller: "usa",
-        model: "one_time",
-        price: 350,
-        status: "offered",
-      },
-    ],
+    breakthroughProposal: null,
+    combinedProjects: [],
+    researchLicenses: [],
     worldHappiness: 64,
     globalTemperature: 1.0,
     cycle: 1,
@@ -184,6 +151,7 @@ export function applyTradeTransfer(
     money: item === "money" ? amount : 0,
     energy: item === "energy" ? amount : 0,
     food: item === "food" ? amount : 0,
+    population: item === "population" ? amount : 0,
     technology: item === "technology" ? amount : 0,
     goods: item === "goods" ? amount : 0,
   };
@@ -192,6 +160,7 @@ export function applyTradeTransfer(
     money: item === "money" ? -amount : 0,
     energy: item === "energy" ? -amount : 0,
     food: item === "food" ? -amount : 0,
+    population: item === "population" ? -amount : 0,
     technology: item === "technology" ? -amount : 0,
     goods: item === "goods" ? -amount : 0,
   };
@@ -199,6 +168,7 @@ export function applyTradeTransfer(
   if (item === "money" && from.money < amount) return null;
   if (item === "energy" && from.energy < amount) return null;
   if (item === "food" && from.food < amount) return null;
+  if (item === "population" && from.population < amount) return null;
   if (item === "technology" && from.technology < amount) return null;
   if (item === "goods" && from.goods < amount) return null;
 
@@ -216,6 +186,7 @@ const REGION_EFFECT_KEYS: (keyof BuildEffects)[] = [
   "money", "energy", "food", "population", "happiness", "co2", "technology", "goods",
 ];
 
+/** Allow food/energy to go negative briefly for shortage detection. */
 export function applyEffectsToRegion(
   region: RegionState,
   effects: BuildEffects
@@ -224,7 +195,11 @@ export function applyEffectsToRegion(
   for (const key of REGION_EFFECT_KEYS) {
     const delta = effects[key];
     if (delta !== undefined) {
-      next[key] = Math.max(0, next[key] + delta);
+      if (key === "food" || key === "energy") {
+        next[key] = next[key] + delta;
+      } else {
+        next[key] = Math.max(0, next[key] + delta);
+      }
     }
   }
   return next;
@@ -234,100 +209,167 @@ export function co2TemperatureDelta(co2?: number): number {
   return (co2 ?? 0) * 0.001;
 }
 
-export function getNextBreakthroughPartners(cycle: number): CountryId[] {
-  return pickRandomPartners(["usa", "eu"], 2, cycle * 7919);
-}
-
-/** Bonus yield multiplier when extractor sits on a matching deposit tile. */
-const EXTRACTOR_DEPOSIT_BONUS = 3;
-/** Base yield per tier when no matching tile deposit. */
-const EXTRACTOR_BASE_YIELD = 1;
-/** Region aggregate divisor for reduced off-deposit extraction. */
-const EXTRACTOR_AGGREGATE_DIVISOR = 25;
-
-function computeExtractorYields(
-  hexes: HexData[],
-  prev: GameState
-): Record<CountryId, Record<ResourceDeposit, number>> {
-  const hexMap = new Map(hexes.map((h) => [`${h.q},${h.r}`, h]));
-  const tileDepositCounts = countDepositsByCountry(hexes);
-  const yields = {} as Record<CountryId, Record<ResourceDeposit, number>>;
-
-  for (const id of ALL_COUNTRIES) {
-    yields[id] = emptyDepositCounts();
-  }
-
-  for (const building of Object.values(prev.tileBuildings)) {
-    if (building.type !== "extractor" || !building.countryId) continue;
-
-    const region = prev.regions[building.countryId];
-    const hex = hexMap.get(`${building.q},${building.r}`);
-    const regionCounts = tileDepositCounts[building.countryId];
-
-    for (const deposit of DEPOSIT_TRADE_ITEMS) {
-      if (!region.extractionUnlocks[deposit]) continue;
-
-      let amount: number;
-      if (hex?.resource === deposit) {
-        amount = building.tier * EXTRACTOR_DEPOSIT_BONUS;
-      } else {
-        const aggregate = regionCounts[deposit] ?? 0;
-        amount = Math.max(
-          EXTRACTOR_BASE_YIELD,
-          Math.round(building.tier * EXTRACTOR_BASE_YIELD * (aggregate / EXTRACTOR_AGGREGATE_DIVISOR))
-        );
-      }
-      yields[building.countryId][deposit] += amount;
-    }
-  }
-
-  return yields;
-}
-
 /**
- * Process one cycle:
- * 0. Extractor passive yields
- * 1. Deduct infrastructure upkeep
- * 2. Auto-deduct flat transit fees
- * 3. Process continuous trades (commission, emissions, resource transfer)
- * 4. Auto-disrupt transit on low relations
- * 5. Advance cycle
+ * Process one cycle per population-mechanics.md:
+ * 1. Per-capita consumption
+ * 2. Workforce check (LIFO idle; crisis forces all idle)
+ * 3. Extraction
+ * 4. Material consumption (fuel/uranium)
+ * 5. Building yields
+ * 6. Building recurring costs + infra upkeep
+ * 7. Trade processing
+ * 8. CO₂ sum
+ * 9. Temperature update
+ * 10. Climate effects — farm yield penalty above +2.0°C
+ * 11. Happiness update (CO₂, temperature, shortage)
+ * 12. Population effects (loss, riots)
+ * 13. Clamp food/energy floors
+ * 14. Advance cycle
  */
 export function processCycle(prev: GameState, hexes: HexData[] = []): GameState {
   let regions = { ...prev.regions };
+  let tileBuildings = { ...prev.tileBuildings };
   let transitAgreements = [...prev.transitAgreements];
   let transportRoutes = [...prev.transportRoutes];
   let tradeAgreements = [...prev.tradeAgreements];
   let globalTemperature = prev.globalTemperature;
+  let cycleCo2 = 0;
 
-  // 0. Extractor passive yields
-  if (hexes.length > 0) {
-    const extractorYields = computeExtractorYields(hexes, prev);
-    for (const id of ALL_COUNTRIES) {
-      const r = regions[id];
-      const added = extractorYields[id];
-      const deposits = { ...r.deposits };
-      for (const dep of DEPOSIT_TRADE_ITEMS) {
-        deposits[dep] += added[dep];
-      }
-      regions = { ...regions, [id]: { ...r, deposits } };
-    }
-  }
+  const hexMap = new Map(hexes.map((h) => [`${h.q},${h.r}`, h]));
+  const INFRA_TYPES: InfraType[] = ["airport", "dock", "transport_center"];
 
-  // 1. Infrastructure upkeep — deduct per facility
-  const INFRA_TYPES = ["airport", "dock", "transport_center"] as const;
-  const UPKEEP: Record<1 | 2 | 3, number> = { 1: 20, 2: 35, 3: 50 };
-  for (const building of Object.values(prev.tileBuildings)) {
-    if (!INFRA_TYPES.includes(building.type as typeof INFRA_TYPES[number])) continue;
-    if (!building.countryId) continue;
-    const r = regions[building.countryId];
+  // 1. Per-capita consumption
+  for (const id of ALL_COUNTRIES) {
+    const region = regions[id];
+    const drain = computePerCapitaConsumption(region.population);
     regions = {
       ...regions,
-      [building.countryId]: { ...r, money: r.money - UPKEEP[building.tier] },
+      [id]: {
+        ...region,
+        food: region.food - drain.food,
+        energy: region.energy - drain.energy,
+        money: Math.max(0, region.money - drain.money),
+      },
     };
   }
 
-  // 2. Auto-deduct flat transit fees
+  // Per-region building processing (steps 2–6)
+  for (const id of ALL_COUNTRIES) {
+    const regionBuildings = Object.values(tileBuildings).filter(
+      (b) => b.countryId === id
+    );
+    let region = regions[id];
+    const startHappiness = region.happiness;
+
+    // 2. Workforce check (crisis/collapse forces all buildings idle)
+    const workforceIdle = computeIdleBuildingIds(regionBuildings, region.population, startHappiness);
+
+    // 3. Extraction
+    for (const building of regionBuildings) {
+      if (building.type !== "extractor") continue;
+      const hex = hexMap.get(`${building.q},${building.r}`);
+      const yieldResult = getExtractorYield(building, hex, workforceIdle.has(building.id));
+      if (yieldResult) {
+        const deposits = { ...region.deposits };
+        deposits[yieldResult.deposit] += yieldResult.amount;
+        region = { ...region, deposits };
+      }
+    }
+
+    // 4. Material consumption check + deduct
+    const materialIdle = computeMaterialShortageIdleIds(
+      regionBuildings,
+      workforceIdle,
+      region.deposits
+    );
+    region = {
+      ...region,
+      deposits: consumePlantMaterials(
+        regionBuildings,
+        workforceIdle,
+        materialIdle,
+        region.deposits
+      ),
+    };
+
+    // 5. Building yields (unrest halves village/city growth)
+    for (const building of regionBuildings) {
+      const hex = hexMap.get(`${building.q},${building.r}`);
+      const yields = computeBuildingYields(
+        building,
+        hex,
+        region.deposits.rare_earth,
+        workforceIdle,
+        materialIdle,
+        startHappiness
+      );
+      if (Object.keys(yields).length > 0) {
+        region = applyEffectsToRegion(region, yields);
+        cycleCo2 += yields.co2 ?? 0;
+      }
+    }
+
+    // 6. Building recurring costs + infrastructure upkeep
+    for (const building of regionBuildings) {
+      const costs = computeBuildingCosts(building, workforceIdle, materialIdle);
+      if (Object.keys(costs).length > 0) {
+        region = applyEffectsToRegion(region, costs);
+        cycleCo2 += costs.co2 ?? 0;
+      }
+
+      if (INFRA_TYPES.includes(building.type as InfraType) && !workforceIdle.has(building.id)) {
+        const infraType = building.type as InfraType;
+        const upkeep = INFRA_UPKEEP[infraType][building.tier];
+        region = { ...region, money: region.money - upkeep };
+      }
+    }
+
+    regions = { ...regions, [id]: region };
+  }
+
+  // 7. Trade processing
+  for (const trade of tradeAgreements) {
+    if (!trade.active || trade.tradeMode !== "continuous") continue;
+    const route = transportRoutes.find((r) => r.id === trade.routeId);
+
+    const co2 = route?.emissionsPerCycle ?? 0;
+    if (co2 > 0) {
+      const fromRegion = regions[trade.from];
+      regions = {
+        ...regions,
+        [trade.from]: { ...fromRegion, co2: fromRegion.co2 + co2 },
+      };
+      cycleCo2 += co2;
+    }
+
+    const routeTransits = transitAgreements.filter(
+      (a) => a.routeId === trade.routeId && a.status === "active" && a.feeModel === "commission"
+    );
+    const tradeValue = trade.item === "money" ? trade.amount : trade.amount * 0.5;
+    for (const transit of routeTransits) {
+      const fee = Math.round(tradeValue * (transit.feeAmount / 100));
+      const p = regions[transit.payer];
+      const t = regions[transit.transitRegion];
+      regions = {
+        ...regions,
+        [transit.payer]: { ...p, money: p.money - fee },
+        [transit.transitRegion]: { ...t, money: t.money + fee },
+      };
+    }
+
+    const fromR = regions[trade.from];
+    const toR = regions[trade.to];
+    const transferred = applyTradeTransfer(fromR, toR, trade.item, trade.amount);
+    if (transferred) {
+      regions = {
+        ...regions,
+        [trade.from]: transferred.from,
+        [trade.to]: transferred.to,
+      };
+    }
+  }
+
+  // Flat transit fees (part of trade step)
   for (const agreement of transitAgreements) {
     if (agreement.status !== "active" || agreement.feeModel !== "flat") continue;
     const payer = regions[agreement.payer];
@@ -351,52 +393,65 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     }
   }
 
-  // 3. Process continuous trades
-  for (const trade of tradeAgreements) {
-    if (!trade.active || trade.tradeMode !== "continuous") continue;
-    const route = transportRoutes.find((r) => r.id === trade.routeId);
+  // 8–9. CO₂ sum → temperature
+  globalTemperature += co2TemperatureDelta(cycleCo2);
 
-    // Apply transport emissions from route
-    const co2 = route?.emissionsPerCycle ?? 0;
-    if (co2 > 0) {
-      const fromRegion = regions[trade.from];
-      regions = {
-        ...regions,
-        [trade.from]: { ...fromRegion, co2: fromRegion.co2 + co2 },
-      };
-      globalTemperature += co2TemperatureDelta(co2);
-    }
-
-    // Apply commission fees
-    const routeTransits = transitAgreements.filter(
-      (a) => a.routeId === trade.routeId && a.status === "active" && a.feeModel === "commission"
+  // 10. Climate effects — farm yield penalty above +2.0°C (uses updated temperature)
+  for (const id of ALL_COUNTRIES) {
+    const regionBuildings = Object.values(tileBuildings).filter((b) => b.countryId === id);
+    let region = regions[id];
+    const startHappiness = region.happiness;
+    const workforceIdle = computeIdleBuildingIds(regionBuildings, region.population, startHappiness);
+    const materialIdle = computeMaterialShortageIdleIds(
+      regionBuildings,
+      workforceIdle,
+      region.deposits
     );
-    const tradeValue = trade.item === "money" ? trade.amount : trade.amount * 0.5;
-    for (const transit of routeTransits) {
-      const fee = Math.round(tradeValue * (transit.feeAmount / 100));
-      const p = regions[transit.payer];
-      const t = regions[transit.transitRegion];
-      regions = {
-        ...regions,
-        [transit.payer]: { ...p, money: p.money - fee },
-        [transit.transitRegion]: { ...t, money: t.money + fee },
-      };
+
+    for (const building of regionBuildings) {
+      if (building.type !== "farm") continue;
+      if (workforceIdle.has(building.id) || materialIdle.has(building.id)) continue;
+      const baseFood = BUILD_BY_ID.farm.effectsByTier[building.tier].food ?? 0;
+      if (baseFood <= 0) continue;
+      const adjustment = computeFarmClimateFoodAdjustment(baseFood, globalTemperature);
+      if (adjustment !== 0) {
+        region = { ...region, food: region.food + adjustment };
+      }
     }
 
-    // Transfer resources
-    const fromR = regions[trade.from];
-    const toR = regions[trade.to];
-    const transferred = applyTradeTransfer(fromR, toR, trade.item, trade.amount);
-    if (transferred) {
-      regions = {
-        ...regions,
-        [trade.from]: transferred.from,
-        [trade.to]: transferred.to,
-      };
-    }
+    regions = { ...regions, [id]: region };
   }
 
-  // 4. Auto-disrupt transit on low relations
+  // 11. Happiness update (uses post-temperature global temp)
+  for (const id of ALL_COUNTRIES) {
+    regions = {
+      ...regions,
+      [id]: applyHappinessUpdate(regions[id], globalTemperature),
+    };
+  }
+
+  // 12. Population effects (loss, collapse riots)
+  const popResult = applyPopulationEffects(
+    regions,
+    tileBuildings,
+    ALL_COUNTRIES
+  );
+  regions = popResult.regions;
+  tileBuildings = popResult.tileBuildings;
+
+  // 13. Clamp food/energy floors
+  for (const id of ALL_COUNTRIES) {
+    regions = {
+      ...regions,
+      [id]: clampResourceFloors(regions[id]),
+    };
+  }
+
+  const worldHappiness = Math.round(
+    ALL_COUNTRIES.reduce((sum, id) => sum + regions[id].happiness, 0) / ALL_COUNTRIES.length
+  );
+
+  // Auto-disrupt transit on low relations
   for (const agreement of transitAgreements) {
     if (agreement.status !== "active") continue;
     const transitRelations = regions[agreement.transitRegion].relations;
@@ -418,10 +473,12 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   return {
     ...prev,
     regions,
+    tileBuildings,
     transitAgreements,
     transportRoutes,
     tradeAgreements,
     globalTemperature,
+    worldHappiness,
     cycle: prev.cycle + 1,
   };
 }

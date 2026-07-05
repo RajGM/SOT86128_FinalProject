@@ -343,101 +343,103 @@ function assignTerrain(
   }
 }
 
+/** Country-weighted deposit roll — profiles from v1-mechanics.md */
+function rollDepositForCountry(
+  countryId: CountryId,
+  terrain: TerrainType,
+  rand: () => number
+): ResourceDeposit | null {
+  const roll = rand();
+
+  switch (countryId) {
+    case "usa":
+      // Many fuel, some uranium, few rare earth
+      if (roll < 0.55) return "fuel";
+      if (roll < 0.72) return "uranium";
+      if (roll < 0.82) return "rare_earth";
+      return null;
+
+    case "eu":
+      // Few of everything — resource-poor
+      if (roll < 0.12) return "fuel";
+      if (roll < 0.2) return "uranium";
+      if (roll < 0.28) return "rare_earth";
+      return null;
+
+    case "russia":
+      // Many fuel, some uranium, some rare earth
+      if (roll < 0.5) return "fuel";
+      if (roll < 0.65) return "uranium";
+      if (roll < 0.78) return "rare_earth";
+      return null;
+
+    case "china":
+      // Some fuel, few uranium, many rare earth
+      if (roll < 0.25) return "fuel";
+      if (roll < 0.32) return "uranium";
+      if (roll < 0.72) return "rare_earth";
+      return null;
+
+    case "india":
+      // Few of everything
+      if (roll < 0.1) return "fuel";
+      if (roll < 0.16) return "uranium";
+      if (roll < 0.22) return "rare_earth";
+      return null;
+
+    case "opec":
+      // Very many fuel, no uranium, no rare earth
+      if (roll < 0.75) return "fuel";
+      return null;
+
+    case "latam":
+      // Few fuel, some uranium, some rare earth
+      if (roll < 0.22) return "fuel";
+      if (roll < 0.38) return "uranium";
+      if (roll < 0.52) return "rare_earth";
+      return null;
+
+    case "africa":
+      // Some fuel, some uranium, many rare earth
+      if (roll < 0.28) return "fuel";
+      if (roll < 0.42) return "uranium";
+      if (roll < 0.72) return "rare_earth";
+      return null;
+
+    default:
+      return null;
+  }
+}
+
 function assignResource(
-  q: number,
-  r: number,
+  _q: number,
+  _r: number,
   terrain: TerrainType,
   countryId: CountryId | null,
   rand: () => number
 ): ResourceDeposit | null {
   if (countryId === null || terrain === "ocean" || terrain === "arctic") return null;
 
-  const roll = rand();
-  const resourceThreshold = (countryId === "latam" || countryId === "africa") ? 0.35 : 0.25;
-
-  if (roll > resourceThreshold) {
-    if (terrain === "agricultural" || terrain === "forest" || terrain === "land") {
-      return rand() < 0.35 ? "mixed" : null;
-    }
-    return null;
+  // OPEC: no uranium tiles at all
+  if (countryId === "opec") {
+    const threshold = terrain === "desert" || terrain === "coastal" ? 0.45 : 0.3;
+    if (rand() > threshold) return null;
+    return rollDepositForCountry(countryId, terrain, rand);
   }
 
-  const resourceRoll = rand();
+  const resourceThreshold =
+    countryId === "china" || countryId === "africa" ? 0.38
+      : countryId === "eu" || countryId === "india" ? 0.18
+        : 0.28;
 
-  switch (countryId) {
-    case "usa":
-      if (terrain === "desert" || terrain === "land") {
-        if (resourceRoll < 0.65) return "fuel";
-      }
-      if (terrain === "agricultural" || terrain === "forest") return "mixed";
-      if (resourceRoll < 0.2) return "uranium";
-      if (resourceRoll < 0.35) return "rare_earth";
-      return "mixed";
+  if (rand() > resourceThreshold) return null;
 
-    case "eu":
-      if (terrain === "coastal") return resourceRoll < 0.4 ? "mixed" : null;
-      if (terrain === "agricultural" || terrain === "forest") return "mixed";
-      if (terrain === "mountain" && resourceRoll < 0.35) return "uranium";
-      if (terrain === "mountain" && resourceRoll < 0.55) return "rare_earth";
-      return resourceRoll < 0.3 ? "mixed" : null;
-
-    case "russia":
-      if (resourceRoll < 0.55) return "fuel";
-      if (resourceRoll < 0.65) return "uranium";
-      if (terrain === "forest") return resourceRoll < 0.8 ? "mixed" : null;
-      return resourceRoll < 0.75 ? "fuel" : null;
-
-    case "china":
-      if (resourceRoll < 0.45) return "rare_earth";
-      if (resourceRoll < 0.6) return "fuel";
-      if (terrain === "agricultural") return "mixed";
-      return resourceRoll < 0.75 ? "mixed" : null;
-
-    case "india":
-      if (terrain === "agricultural" || terrain === "forest") return "mixed";
-      if (terrain === "desert" || terrain === "land") {
-        if (resourceRoll < 0.4) return "fuel";
-      }
-      if (resourceRoll < 0.35) return "rare_earth";
-      return "mixed";
-
-    case "opec":
-      if (r <= 10) {
-        if (resourceRoll < 0.5) return "fuel";
-        if (resourceRoll < 0.65) return "uranium";
-        return resourceRoll < 0.8 ? "fuel" : null;
-      }
-      if (q >= 36 && r >= 14) {
-        if (terrain === "agricultural") return "mixed";
-        if (resourceRoll < 0.35) return "fuel";
-        return "mixed";
-      }
-      if (resourceRoll < 0.65) return "fuel";
-      if (terrain === "coastal") return resourceRoll < 0.5 ? "fuel" : "mixed";
-      return null;
-
-    case "latam":
-      if (terrain === "forest") return resourceRoll < 0.45 ? "mixed" : null;
-      if (terrain === "land" || terrain === "desert") {
-        if (resourceRoll < 0.3) return "fuel";
-        if (resourceRoll < 0.5) return "rare_earth";
-      }
-      if (terrain === "agricultural") return "mixed";
-      return resourceRoll < 0.4 ? "mixed" : null;
-
-    case "africa":
-      if (terrain === "mountain" || terrain === "land") {
-        if (resourceRoll < 0.35) return "rare_earth";
-        if (resourceRoll < 0.5) return "uranium";
-        if (resourceRoll < 0.6) return "fuel";
-      }
-      if (terrain === "forest" || terrain === "agricultural") return "mixed";
-      if (terrain === "coastal") return resourceRoll < 0.45 ? "fuel" : resourceRoll < 0.6 ? "mixed" : null;
-      return resourceRoll < 0.35 ? "mixed" : null;
-
-    default:
-      return null;
+  // Prefer fuel on desert/coastal for fossil exporters
+  if ((terrain === "desert" || terrain === "coastal") && countryId !== "eu") {
+    if (rand() < 0.55) return "fuel";
   }
+
+  return rollDepositForCountry(countryId, terrain, rand);
 }
 
 export function generateMap(seed: number = 42): HexData[] {

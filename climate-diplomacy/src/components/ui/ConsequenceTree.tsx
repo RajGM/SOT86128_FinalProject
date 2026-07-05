@@ -57,7 +57,7 @@ export function ConsequenceTree({ buildType, tier, mode = "place", nextTier }: C
 
   return (
     <>
-      <div className="section-title">Consequence Tree</div>
+      <div className="section-title">Consequence Tree (per cycle)</div>
       <div className="card">
         <div className="consequence-tree">
           {lines.join("\n")}

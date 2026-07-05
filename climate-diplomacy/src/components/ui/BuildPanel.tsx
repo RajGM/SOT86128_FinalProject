@@ -3,14 +3,19 @@ import { useGame } from "../../context/GameContext";
 import {
   getAvailableBuildsForTile,
   getBuildCost,
+  getBuildTechCost,
   getBuildDefinition,
   getDemolishCost,
   getUpgradeCost,
+  getUpgradeTechCost,
   canUpgradeTier,
   canPostTier3Upgrade,
   getPostTier3UpgradeCost,
   DOCK_COASTAL_PLACEMENT_MESSAGE,
   EXTRACTOR_DEPOSIT_PLACEMENT_MESSAGE,
+  FARM_AGRICULTURAL_PLACEMENT_MESSAGE,
+  VILLAGE_TERRAIN_PLACEMENT_MESSAGE,
+  TRANSPORT_CENTER_TERRAIN_MESSAGE,
 } from "../../lib/buildRules";
 import { createHexLookup } from "../../lib/hexUtils";
 import { formatRoutePath } from "../../lib/routeDetection";
@@ -19,6 +24,11 @@ import { hexToTileTags } from "../../types/game";
 import { COUNTRY_CONFIGS, RESOURCE_LABELS } from "../../types/hex";
 import type { BuildType } from "../../types/game";
 import { ConsequenceTree } from "./ConsequenceTree";
+import {
+  getHappinessCascade,
+  HAPPINESS_CASCADE_LABELS,
+  isConstructionBlocked,
+} from "../../lib/populationMechanics";
 import "./overlay.css";
 
 type ManageAction = "upgrade" | "demolish" | "routes" | null;
@@ -48,13 +58,16 @@ export function BuildPanel() {
 
   const available = useMemo(() => {
     if (!selectedHex) return [];
+    const regionId = selectedHex.countryId ?? (gameState.testingMode ? viewCountry : "usa");
+    const regionTech = gameState.regions[regionId].technology;
     return getAvailableBuildsForTile(
       selectedHex,
       gameState.tileBuildings,
       gameState.testingMode,
-      hexLookup
+      hexLookup,
+      regionTech
     );
-  }, [selectedHex, gameState.tileBuildings, gameState.testingMode, hexLookup]);
+  }, [selectedHex, gameState.tileBuildings, gameState.testingMode, gameState.regions, viewCountry, hexLookup]);
 
   const buildsByType = useMemo(() => {
     const map = new Map<
@@ -99,7 +112,10 @@ export function BuildPanel() {
   const upgradeCost = existingDef && existing && canUpgradeTier(existing.tier)
     ? getUpgradeCost(existingDef, existing.tier)
     : null;
-  const canUpgrade = upgradeCost !== null && region.money >= upgradeCost;
+  const upgradeTechCost = existingDef && existing && canUpgradeTier(existing.tier)
+    ? getUpgradeTechCost(existingDef, existing.tier)
+    : 0;
+  const canUpgrade = upgradeCost !== null && region.money >= upgradeCost && region.technology >= upgradeTechCost;
   const canDemolish = demolishBreakdown !== null && region.money >= demolishBreakdown.demolitionFee;
   const nextTier = existing && canUpgradeTier(existing.tier) ? ((existing.tier + 1) as 2 | 3) : null;
 
@@ -134,25 +150,32 @@ export function BuildPanel() {
     selectedBuildType && selectedTier
       ? getBuildCost(getBuildDefinition(selectedBuildType), selectedTier)
       : 0;
+  const placeTechCost =
+    selectedBuildType && selectedTier
+      ? getBuildTechCost(getBuildDefinition(selectedBuildType), selectedTier)
+      : 0;
   const selectedPlacement = selectedBuildType && selectedTier
     ? available.find((item) => item.build.id === selectedBuildType && item.tier === selectedTier)?.availability
     : null;
-  const dockPlacementBlocked =
-    selectedBuildType === "dock" &&
+  const placementBlocked =
     selectedPlacement !== null &&
     selectedPlacement !== undefined &&
-    !selectedPlacement.available;
-  const extractorPlacementBlocked =
-    selectedBuildType === "extractor" &&
-    selectedPlacement !== null &&
-    selectedPlacement !== undefined &&
-    !selectedPlacement.available;
-  const placementBlocked = dockPlacementBlocked || extractorPlacementBlocked;
+    !selectedPlacement.available &&
+    (selectedBuildType === "dock" ||
+      selectedBuildType === "extractor" ||
+      selectedBuildType === "farm" ||
+      selectedBuildType === "village" ||
+      selectedBuildType === "transport_center" ||
+      selectedBuildType === "green_plant");
+  const happinessCascade = getHappinessCascade(region.happiness);
+  const constructionBlocked = isConstructionBlocked(region.happiness);
   const canPlaceBuild =
     selectedBuildType !== null &&
     selectedTier !== null &&
     region.money >= placeCost &&
-    (selectedPlacement?.available ?? false);
+    region.technology >= placeTechCost &&
+    (selectedPlacement?.available ?? false) &&
+    !constructionBlocked;
 
   const showBuildPreview = !existing && selectedBuildType && selectedTier;
   const showManagePreview =
@@ -193,8 +216,13 @@ export function BuildPanel() {
               </>
             )}
             <div className="tile-info-budget">
-              Budget: {Math.round(region.money)} money
+              Budget: {Math.round(region.money)} money · Happiness: {Math.round(region.happiness)}% ({HAPPINESS_CASCADE_LABELS[happinessCascade]})
             </div>
+            {constructionBlocked && (
+              <div style={{ marginTop: 6, fontSize: 11, color: "#ef4444" }}>
+                Collapse: new construction blocked until happiness recovers above 15%.
+              </div>
+            )}
           </div>
 
           {existing && existingDef && (
@@ -202,13 +230,13 @@ export function BuildPanel() {
               <div className="card build-existing-summary">
                 <div style={{ fontWeight: 600 }}>{existingDef.name} — Tier {existing.tier}</div>
                 <div className="build-existing-desc">{existingDef.description}</div>
-                {existing.type === "extractor" && (
+                <div className="build-existing-note">
+                  Workforce: {existingDef.workforce} · Effects apply each cycle when staffed
+                </div>
+                {existing.type === "extractor" && selectedHex.resource && (
                   <div className="build-existing-note">
-                    Unlocked:{" "}
-                    {Object.entries(region.extractionUnlocks)
-                      .filter(([, v]) => v)
-                      .map(([k]) => RESOURCE_LABELS[k as keyof typeof RESOURCE_LABELS])
-                      .join(", ") || "None — research extraction unlocks first"}
+                    Extracts {RESOURCE_LABELS[selectedHex.resource]}:{" "}
+                    {existing.tier === 1 ? 2 : existing.tier === 2 ? 4 : 7} units/cycle
                   </div>
                 )}
               </div>
@@ -287,6 +315,7 @@ export function BuildPanel() {
                     <div><strong>Upgrade cost:</strong>{" "}
                       <span style={{ color: canUpgrade ? "#22c55e" : "#ef4444", fontWeight: 700 }}>
                         {upgradeCost} money
+                        {upgradeTechCost > 0 && `, ${upgradeTechCost} tech`}
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
@@ -309,7 +338,7 @@ export function BuildPanel() {
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
-                      Reduces transport emissions by ~8% per level. Zero emissions require breakthrough research.
+                      Reduces transport emissions by ~8% per level.
                     </div>
                   </div>
                 )}
@@ -366,6 +395,7 @@ export function BuildPanel() {
                   <div className="build-type-column">
                     {buildsByType.map(({ build, tiers }) => {
                       const minCost = Math.min(...tiers.map((t) => getBuildCost(build, t.tier)));
+                      const minTech = Math.min(...tiers.map((t) => getBuildTechCost(build, t.tier)));
                       const isSelected = selectedBuildType === build.id;
                       return (
                         <button
@@ -376,7 +406,11 @@ export function BuildPanel() {
                         >
                           <div className="build-type-name">{build.name}</div>
                           <div className="build-type-meta">
-                            <span className="from-cost">from {minCost}</span>
+                            <span className="from-cost">
+                              from {minCost}
+                              {minTech > 0 && ` + ${minTech} tech`}
+                            </span>
+                            <span className="from-cost"> · {build.workforce} workers</span>
                           </div>
                         </button>
                       );
@@ -388,7 +422,8 @@ export function BuildPanel() {
                       <div className="tier-column-label">Tier</div>
                       {selectedTypeEntry.tiers.map(({ tier, reason }) => {
                         const cost = getBuildCost(selectedTypeEntry.build, tier);
-                        const canAfford = region.money >= cost;
+                        const techCost = getBuildTechCost(selectedTypeEntry.build, tier);
+                        const canAfford = region.money >= cost && region.technology >= techCost;
                         const isTierSelected = selectedTier === tier;
                         return (
                           <button
@@ -404,6 +439,7 @@ export function BuildPanel() {
                               style={{ color: canAfford ? "#22c55e" : "#ef4444" }}
                             >
                               {cost}
+                              {techCost > 0 && `+${techCost}T`}
                             </span>
                           </button>
                         );
@@ -419,22 +455,20 @@ export function BuildPanel() {
                   <span> · Tier {selectedTier}</span>
                   <span style={{ color: canPlaceBuild ? "#22c55e" : "#ef4444", fontWeight: 700 }}>
                     {" "}· {placeCost} money
+                    {placeTechCost > 0 && `, ${placeTechCost} tech`}
                   </span>
-                  {selectedTypeEntry.tiers.find((t) => t.tier === selectedTier)?.reason && (
-                    <div
-                      className={`build-selection-note ${placementBlocked ? "build-selection-error" : ""}`}
-                    >
+                  {placementBlocked && selectedTypeEntry.tiers.find((t) => t.tier === selectedTier)?.reason && (
+                    <div className="build-selection-note build-selection-error">
                       {selectedTypeEntry.tiers.find((t) => t.tier === selectedTier)!.reason}
                     </div>
                   )}
-                  {dockPlacementBlocked && !selectedTypeEntry.tiers.find((t) => t.tier === selectedTier)?.reason && (
+                  {placementBlocked && !selectedTypeEntry.tiers.find((t) => t.tier === selectedTier)?.reason && (
                     <div className="build-selection-note build-selection-error">
-                      {DOCK_COASTAL_PLACEMENT_MESSAGE}
-                    </div>
-                  )}
-                  {extractorPlacementBlocked && !selectedTypeEntry.tiers.find((t) => t.tier === selectedTier)?.reason && (
-                    <div className="build-selection-note build-selection-error">
-                      {EXTRACTOR_DEPOSIT_PLACEMENT_MESSAGE}
+                      {selectedBuildType === "dock" && DOCK_COASTAL_PLACEMENT_MESSAGE}
+                      {selectedBuildType === "extractor" && EXTRACTOR_DEPOSIT_PLACEMENT_MESSAGE}
+                      {selectedBuildType === "farm" && FARM_AGRICULTURAL_PLACEMENT_MESSAGE}
+                      {selectedBuildType === "village" && VILLAGE_TERRAIN_PLACEMENT_MESSAGE}
+                      {selectedBuildType === "transport_center" && TRANSPORT_CENTER_TERRAIN_MESSAGE}
                     </div>
                   )}
                 </div>

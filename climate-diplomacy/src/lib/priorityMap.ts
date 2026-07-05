@@ -2,6 +2,10 @@ import type { CountryId } from "../types/hex";
 import type { GameSuggestion, PriorityEntry, PriorityStatus, RegionState } from "../types/game";
 import { REGION_PROFILES } from "../config/regionProfiles";
 import { COUNTRY_CONFIGS } from "../types/hex";
+import {
+  computePerCapitaConsumption,
+  getHappinessCascade,
+} from "./populationMechanics";
 
 function statusFromRatio(value: number, thresholds: [number, number, number]): PriorityStatus {
   if (value >= thresholds[0]) return "green";
@@ -11,8 +15,18 @@ function statusFromRatio(value: number, thresholds: [number, number, number]): P
 }
 
 export function computePriorityMap(region: RegionState, id: CountryId): PriorityEntry[] {
-  const foodPerPop = region.food / Math.max(region.population, 1) * 100;
-  const energyPerPop = region.energy / Math.max(region.population, 1) * 100;
+  const perCapita = computePerCapitaConsumption(region.population);
+  const foodSurplus = region.food - perCapita.food;
+  const energySurplus = region.energy - perCapita.energy;
+  const foodPerPop = foodSurplus / Math.max(region.population, 1) * 100;
+  const energyPerPop = energySurplus / Math.max(region.population, 1) * 100;
+  const cascade = getHappinessCascade(region.happiness);
+
+  const happinessStatus: PriorityStatus =
+    cascade === "stable" ? "green"
+    : cascade === "concerned" ? "yellow"
+    : cascade === "unrest" ? "orange"
+    : "red";
 
   return [
     {
@@ -37,8 +51,8 @@ export function computePriorityMap(region: RegionState, id: CountryId): Priority
     },
     {
       category: "happiness",
-      status: statusFromRatio(region.happiness, [70, 60, 50]),
-      label: `Happiness: ${Math.round(region.happiness)}%`,
+      status: happinessStatus,
+      label: `Happiness: ${Math.round(region.happiness)}% (${cascade})`,
     },
     {
       category: "emissions",
@@ -64,17 +78,25 @@ export function generateSuggestions(
 ): GameSuggestion[] {
   const suggestions: GameSuggestion[] = [];
   const profile = REGION_PROFILES[id];
-  const foodPerPop = region.food / Math.max(region.population, 1);
+  const perCapita = computePerCapitaConsumption(region.population);
+  const foodSurplus = region.food - perCapita.food;
+  const foodPerPop = foodSurplus / Math.max(region.population, 1);
 
   if (region.energy / region.population < 0.2) {
     suggestions.push({
       id: "energy-shortage",
       priority: 1,
-      text: `Your energy shortage threatens industry. Recommended: build a fossil or renewable plant, import energy from OPEC+, or trade for fuel deposits.`,
+      text: `Your energy shortage threatens industry. Per-capita drain is −${perCapita.energy}/cycle. Build plants, import energy, or trade for fuel.`,
     });
   }
 
-  if (foodPerPop < 0.2) {
+  if (foodSurplus < perCapita.food * 3) {
+    suggestions.push({
+      id: "food-shortage",
+      priority: 2,
+      text: `Food reserves won't last long after per-capita drain (−${perCapita.food}/cycle). Build farms, import food, or trade with food exporters like LatAm.`,
+    });
+  } else if (foodPerPop < 0.2) {
     suggestions.push({
       id: "food-shortage",
       priority: 2,

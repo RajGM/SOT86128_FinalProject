@@ -12,14 +12,11 @@ interface HexTileProps {
 }
 
 const BUILD_ICONS: Record<string, string> = {
-  oil_plant: "🛢",
-  gas_plant: "🔥",
-  coal_plant: "🏭",
-  hydro_plant: "💧",
-  solar_plant: "☀",
-  wind_plant: "🌬",
+  fossil_plant: "🏭",
+  green_plant: "🌿",
   nuclear_plant: "☢",
   industrial_complex: "🏗",
+  manufacturing: "⚙",
   village: "🏘",
   city: "🏙",
   farm: "🌾",

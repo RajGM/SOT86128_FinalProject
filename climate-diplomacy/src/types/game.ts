@@ -10,14 +10,11 @@ export type BuildCategory =
   | "extraction";
 
 export type BuildType =
-  | "oil_plant"
-  | "gas_plant"
-  | "coal_plant"
+  | "fossil_plant"
+  | "green_plant"
   | "nuclear_plant"
-  | "solar_plant"
-  | "wind_plant"
-  | "hydro_plant"
   | "industrial_complex"
+  | "manufacturing"
   | "village"
   | "city"
   | "farm"
@@ -32,15 +29,14 @@ export type TradeItem =
   | "money"
   | "energy"
   | "food"
+  | "population"
   | "fuel"
   | "rare_earth"
   | "uranium"
-  | "mixed"
   | "technology"
   | "goods"
   | "transit_permission"
-  | "airspace_permission"
-  | "research";
+  | "airspace_permission";
 
 export type PriorityStatus = "green" | "yellow" | "orange" | "red";
 
@@ -65,19 +61,28 @@ export interface BuildEffects {
   goods?: number;
 }
 
+export interface BuildTierCost {
+  money: number;
+  tech?: number;
+}
+
 export interface BuildDefinition {
   id: BuildType;
   name: string;
   category: BuildCategory;
   description: string;
   tierRequirements?: Partial<Record<1 | 2 | 3, string>>;
-  baseCost: number;
+  /** Cumulative placement cost per tier (money + optional tech). */
+  costByTier: Record<1 | 2 | 3, BuildTierCost>;
+  /** Fixed workers required per building (same at all tiers). */
+  workforce: number;
   /** Fraction of placed cost charged to demolish (default 0.25). */
   demolishCostRatio?: number;
   /** Fraction of placed cost refunded on demolish (default 0.35). */
   demolishRefundRatio?: number;
   /** Fraction of tier-delta cost charged to upgrade (default 0.75). */
   upgradeCostRatio?: number;
+  /** Per-cycle yields and recurring costs (applied each cycle when staffed). */
   effectsByTier: Record<1 | 2 | 3, BuildEffects>;
   consequenceLines: string[];
 }
@@ -88,6 +93,8 @@ export interface PlacedBuilding {
   tier: 1 | 2 | 3;
   /** Post-tier-3 infinite upgrade level (transport only). */
   extraLevel?: number;
+  /** Construction order for workforce LIFO idle priority. */
+  builtAt: number;
   q: number;
   r: number;
   countryId: CountryId | null;
@@ -120,8 +127,12 @@ export interface TransportRoute {
 
 /** Tier-based infrastructure capacity: max routes per facility */
 export const INFRA_CAPACITY: Record<1 | 2 | 3, number> = { 1: 2, 2: 4, 3: 6 };
-/** Tier-based infrastructure upkeep per cycle */
-export const INFRA_UPKEEP: Record<1 | 2 | 3, number> = { 1: 20, 2: 35, 3: 50 };
+/** Tier-based infrastructure upkeep per cycle by facility type */
+export const INFRA_UPKEEP: Record<InfraType, Record<1 | 2 | 3, number>> = {
+  airport: { 1: 20, 2: 35, 3: 50 },
+  dock: { 1: 15, 2: 25, 3: 40 },
+  transport_center: { 1: 10, 2: 18, 3: 28 },
+};
 /** Tier-based emissions per cycle for each infra type */
 export const INFRA_EMISSIONS: Record<InfraType, Record<1 | 2 | 3, number>> = {
   airport: { 1: 8, 2: 5, 3: 3 },

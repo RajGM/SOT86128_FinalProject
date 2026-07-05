@@ -1,5 +1,5 @@
 import { useGame } from "../../context/GameContext";
-import { ResearchPanel } from "./ResearchPanel";
+import { TechnologyPanel } from "./TechnologyPanel";
 import { DiplomacyPanel } from "./DiplomacyPanel";
 import { TradePanel } from "./TradePanel";
 import { RoutesPanel } from "./RoutesPanel";
@@ -19,7 +19,7 @@ export function DashboardModal() {
         </div>
 
         <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-          {(["research", "diplomacy", "trade", "routes"] as const).map((tab) => (
+          {(["technology", "diplomacy", "trade", "routes"] as const).map((tab) => (
             <button
               key={tab}
               className={`tab-btn ${dashboardTab === tab ? "active" : ""}`}
@@ -31,7 +31,7 @@ export function DashboardModal() {
         </div>
 
         <div className="modal-body">
-          {dashboardTab === "research" && <ResearchPanel />}
+          {dashboardTab === "technology" && <TechnologyPanel />}
           {dashboardTab === "diplomacy" && <DiplomacyPanel />}
           {dashboardTab === "trade" && <TradePanel />}
           {dashboardTab === "routes" && <RoutesPanel />}

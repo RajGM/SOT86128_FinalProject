@@ -65,12 +65,6 @@ export const EXTRACTION_RESEARCH: ExtractionResearchDef[] = [
     description: "Unlock extractors to harvest rare earth minerals for industry.",
     cost: 100,
   },
-  {
-    deposit: "mixed",
-    name: "Mixed Resource Extraction",
-    description: "Unlock extractors to harvest arable land and general resources.",
-    cost: 60,
-  },
 ];
 
 export function isExtractionUnlocked(

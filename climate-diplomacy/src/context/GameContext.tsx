@@ -8,15 +8,17 @@ import type {
   TradeMode,
   TransitFeeModel,
 } from "../types/game";
-import { createInitialGameState, getRegionForHex, applyEffectsToRegion, co2TemperatureDelta, processCycle, applyTradeTransfer } from "../lib/gameState";
+import { createInitialGameState, getRegionForHex, co2TemperatureDelta, processCycle, applyTradeTransfer } from "../lib/gameState";
 import {
   createPlacedBuilding,
   getBuildCost,
+  getBuildTechCost,
   getBuildDefinition,
   getDemolishCost,
   getUpgradeCost,
-  getEffectDelta,
-  reverseEffects,
+  getUpgradeTechCost,
+  canAffordBuild,
+  canAffordUpgrade,
   canUpgradeTier,
   canPostTier3Upgrade,
   getPostTier3UpgradeCost,
@@ -30,11 +32,9 @@ import {
   createTransitAgreement,
 } from "../lib/tradeRules";
 import { findRouteOptions, type RouteOption } from "../lib/routeDetection";
-import { applyResearchUpgrade, applyExtractionResearch } from "../lib/research";
-import type { BuildCategory } from "../types/game";
-import type { ResourceDeposit } from "../types/hex";
 import { tileKey } from "../types/game";
 import { BUILD_BY_ID } from "../config/builds";
+import { isConstructionBlocked } from "../lib/populationMechanics";
 
 interface GameContextValue {
   hexes: HexData[];
@@ -46,9 +46,9 @@ interface GameContextValue {
   resourcesExpanded: boolean;
   toggleResourcesExpanded: () => void;
   dashboardOpen: boolean;
-  dashboardTab: "research" | "diplomacy" | "trade" | "routes";
+  dashboardTab: "technology" | "diplomacy" | "trade" | "routes";
   setDashboardOpen: (open: boolean) => void;
-  setDashboardTab: (tab: "research" | "diplomacy" | "trade" | "routes") => void;
+  setDashboardTab: (tab: "technology" | "diplomacy" | "trade" | "routes") => void;
   buildPanelOpen: boolean;
   setBuildPanelOpen: (open: boolean) => void;
   placeBuild: (type: BuildType, tier: 1 | 2 | 3) => void;
@@ -58,11 +58,6 @@ interface GameContextValue {
   getRouteOptions: (from: CountryId, to: CountryId) => RouteOption[];
   createRoute: (option: RouteOption) => void;
   proposeTrade: (from: CountryId, to: CountryId, item: TradeItem, amount: number, routeId: string, tradeMode?: TradeMode) => void;
-  agreeBreakthrough: (country: CountryId) => void;
-  joinCombinedResearch: (projectId: string, country: CountryId, amount: number) => void;
-  purchaseResearchLicense: (licenseId: string, buyer: CountryId) => void;
-  applyIncrementalResearch: (category: BuildCategory) => void;
-  applyExtractionResearchUnlock: (deposit: ResourceDeposit) => void;
   respondTransitRequest: (requestId: string, feeModel: TransitFeeModel, feeAmount: number, accept: boolean) => void;
   cancelTransit: (agreementId: string) => void;
   acceptTransitTerms: (agreementId: string) => void;
@@ -80,7 +75,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
   const [viewCountry, setViewCountry] = useState<CountryId>("usa");
   const [resourcesExpanded, setResourcesExpanded] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
-  const [dashboardTab, setDashboardTab] = useState<"research" | "diplomacy" | "trade" | "routes">("research");
+  const [dashboardTab, setDashboardTab] = useState<"technology" | "diplomacy" | "trade" | "routes">("technology");
   const [buildPanelOpen, setBuildPanelOpen] = useState(false);
 
   const toggleResourcesExpanded = useCallback(() => {
@@ -97,14 +92,13 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
     (type: BuildType, tier: 1 | 2 | 3) => {
       if (!selectedHex) return;
       const build = getBuildDefinition(type);
-      const cost = getBuildCost(build, tier);
       const key = tileKey(selectedHex.q, selectedHex.r);
       const regionId = resolveRegionId(selectedHex);
-      const effects = build.effectsByTier[tier];
 
       setGameState((prev) => {
         const region = prev.regions[regionId];
-        if (region.money < cost || prev.tileBuildings[key]) return prev;
+        if (prev.tileBuildings[key]) return prev;
+        if (!canAffordBuild(region.money, region.technology, build, tier)) return prev;
 
         const placement = canBuildOnTile(
           selectedHex,
@@ -112,25 +106,31 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           prev.tileBuildings,
           tier,
           prev.testingMode,
-          hexLookup
+          hexLookup,
+          region.technology
         );
         if (!placement.available) return prev;
+        if (isConstructionBlocked(region.happiness)) return prev;
 
         const placed = createPlacedBuilding(type, tier, selectedHex);
         if (prev.testingMode && !selectedHex.countryId) {
           placed.countryId = regionId;
         }
+
+        const cost = getBuildCost(build, tier);
+        const techCost = getBuildTechCost(build, tier);
+
         return {
           ...prev,
           tileBuildings: { ...prev.tileBuildings, [key]: placed },
           regions: {
             ...prev.regions,
-            [regionId]: applyEffectsToRegion(
-              { ...region, money: region.money - cost },
-              effects
-            ),
+            [regionId]: {
+              ...region,
+              money: region.money - cost,
+              technology: region.technology - techCost,
+            },
           },
-          globalTemperature: prev.globalTemperature + co2TemperatureDelta(effects.co2),
         };
       });
     },
@@ -151,8 +151,6 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
       const region = prev.regions[regionId];
       if (region.money < demolitionFee) return prev;
 
-      const tierEffects = build.effectsByTier[existing.tier];
-      const reversed = reverseEffects(tierEffects);
       const { [key]: _removed, ...remainingBuildings } = prev.tileBuildings;
 
       // Disrupt routes using this facility
@@ -173,12 +171,11 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         ),
         regions: {
           ...prev.regions,
-          [regionId]: applyEffectsToRegion(
-            { ...region, money: region.money + netMoneyChange },
-            reversed
-          ),
+          [regionId]: {
+            ...region,
+            money: region.money + netMoneyChange,
+          },
         },
-        globalTemperature: prev.globalTemperature + co2TemperatureDelta(reversed.co2),
       };
     });
   }, [selectedHex, resolveRegionId]);
@@ -194,13 +191,13 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
 
       const build = getBuildDefinition(existing.type);
       const upgradeCost = getUpgradeCost(build, existing.tier);
+      const upgradeTechCost = getUpgradeTechCost(build, existing.tier);
       if (upgradeCost === null) return prev;
 
       const region = prev.regions[regionId];
-      if (region.money < upgradeCost) return prev;
+      if (!canAffordUpgrade(region.money, region.technology, build, existing.tier)) return prev;
 
       const nextTier = (existing.tier + 1) as 2 | 3;
-      const delta = getEffectDelta(build, existing.tier, nextTier);
 
       return {
         ...prev,
@@ -210,12 +207,12 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         },
         regions: {
           ...prev.regions,
-          [regionId]: applyEffectsToRegion(
-            { ...region, money: region.money - upgradeCost },
-            delta
-          ),
+          [regionId]: {
+            ...region,
+            money: region.money - upgradeCost,
+            technology: region.technology - upgradeTechCost,
+          },
         },
-        globalTemperature: prev.globalTemperature + co2TemperatureDelta(delta.co2),
       };
     });
   }, [selectedHex, resolveRegionId]);
@@ -432,15 +429,6 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
     });
   }, []);
 
-  const applyExtractionResearchUnlock = useCallback((deposit: ResourceDeposit) => {
-    setGameState((prev) => {
-      const region = prev.regions[viewCountry];
-      const result = applyExtractionResearch(region, deposit);
-      if (!result) return prev;
-      return { ...prev, regions: { ...prev.regions, [viewCountry]: result.region } };
-    });
-  }, [viewCountry]);
-
   const advanceCycle = useCallback(() => {
     setGameState((prev) => processCycle(prev, hexes));
   }, [hexes]);
@@ -457,95 +445,6 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
   const clearHighlightedRoutes = useCallback(() => {
     setGameState((prev) => ({ ...prev, highlightedRoutes: [] }));
   }, []);
-
-  const agreeBreakthrough = useCallback((country: CountryId) => {
-    setGameState((prev) => {
-      if (!prev.breakthroughProposal) return prev;
-      const agreed = [...prev.breakthroughProposal.agreed, country];
-      const allAgreed =
-        prev.breakthroughProposal.requiredParticipants.every((c) => agreed.includes(c));
-      const next = {
-        ...prev,
-        breakthroughProposal: { ...prev.breakthroughProposal, agreed },
-      };
-      if (allAgreed) {
-        for (const c of prev.breakthroughProposal.requiredParticipants) {
-          next.regions = {
-            ...next.regions,
-            [c]: {
-              ...next.regions[c],
-              breakthroughs: [...next.regions[c].breakthroughs, prev.breakthroughProposal.name],
-              technology: next.regions[c].technology + 10,
-            },
-          };
-        }
-      }
-      return next;
-    });
-  }, []);
-
-  const joinCombinedResearch = useCallback(
-    (projectId: string, country: CountryId, amount: number) => {
-      setGameState((prev) => ({
-        ...prev,
-        combinedProjects: prev.combinedProjects.map((p) => {
-          if (p.id !== projectId) return p;
-          const participants = p.participants.includes(country)
-            ? p.participants
-            : [...p.participants, country];
-          const contributions = {
-            ...p.contributions,
-            [country]: (p.contributions[country] ?? 0) + amount,
-          };
-          const progress = p.progress + amount;
-          return { ...p, participants, contributions, progress, complete: progress >= p.target };
-        }),
-        regions: {
-          ...prev.regions,
-          [country]: applyEffectsToRegion(prev.regions[country], { money: -amount }),
-        },
-      }));
-    },
-    []
-  );
-
-  const purchaseResearchLicense = useCallback((licenseId: string, buyer: CountryId) => {
-    setGameState((prev) => {
-      const license = prev.researchLicenses.find((l) => l.id === licenseId);
-      if (!license || !license.price) return prev;
-      const buyerRegion = prev.regions[buyer];
-      if (buyerRegion.money < license.price) return prev;
-
-      return {
-        ...prev,
-        researchLicenses: prev.researchLicenses.map((l) =>
-          l.id === licenseId ? { ...l, status: "accepted" as const, buyer } : l
-        ),
-        regions: {
-          ...prev.regions,
-          [buyer]: {
-            ...buyerRegion,
-            money: buyerRegion.money - license.price,
-            breakthroughs: [...buyerRegion.breakthroughs, license.breakthrough],
-            technology: buyerRegion.technology + 5,
-          },
-          [license.seller]: {
-            ...prev.regions[license.seller],
-            money: prev.regions[license.seller].money + license.price,
-          },
-        },
-      };
-    });
-  }, []);
-
-  const applyIncrementalResearch = useCallback((category: BuildCategory) => {
-    setGameState((prev) => {
-      const region = prev.regions[viewCountry];
-      const result = applyResearchUpgrade(region, category);
-      if (!result) return prev;
-      return { ...prev, regions: { ...prev.regions, [viewCountry]: result.region } };
-    });
-  }, [viewCountry]);
 
   const handleSetSelectedHex = useCallback((hex: HexData | null) => {
     setSelectedHex(hex);
@@ -578,11 +477,6 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         getRouteOptions,
         createRoute,
         proposeTrade,
-        agreeBreakthrough,
-        joinCombinedResearch,
-        purchaseResearchLicense,
-        applyIncrementalResearch,
-        applyExtractionResearchUnlock,
         advanceCycle,
         respondTransitRequest,
         cancelTransit,
