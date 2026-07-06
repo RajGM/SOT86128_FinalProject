@@ -128,9 +128,9 @@ export function computeCountryRawMetrics(
   countryId: CountryId
 ): MetricRawValues {
   const region = state.regions[countryId];
-  const buildings = Object.values(state.tileBuildings);
+  const buildings = Object.values(state.tileBuildings ?? {});
   const { green, total } = countEnergyBuildings(buildings, countryId);
-  const prevCo2 = state.previousCycleCo2[countryId] ?? region.co2;
+  const prevCo2 = state.previousCycleCo2?.[countryId] ?? region.co2;
 
   return {
     co2PerCapita: computeCo2PerCapita(region.co2, region.population),
@@ -139,10 +139,10 @@ export function computeCountryRawMetrics(
     co2Trend: region.co2 - prevCo2,
     summitVotes: computeSummitYesPercent(
       countryId,
-      state.summitVotes,
-      state.summitNonComplianceStrikes[countryId] ?? 0
+      state.summitVotes ?? [],
+      state.summitNonComplianceStrikes?.[countryId] ?? 0
     ),
-    climateFinance: state.climateFinanceGiven[countryId] ?? 0,
+    climateFinance: state.climateFinanceGiven?.[countryId] ?? 0,
   };
 }
 

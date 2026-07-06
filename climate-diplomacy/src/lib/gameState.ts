@@ -189,6 +189,75 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
   };
 }
 
+/** Restore fields Firebase RTDB omits when arrays/objects are empty. */
+export function hydrateGameState(
+  partial: GameState | null | undefined,
+  hexes: HexData[] = []
+): GameState {
+  const defaults = createInitialGameState(hexes);
+  if (!partial) return defaults;
+
+  const regions = {} as Record<CountryId, RegionState>;
+  for (const id of ALL_COUNTRIES) {
+    const def = defaults.regions[id];
+    const src = partial.regions?.[id];
+    regions[id] = {
+      ...def,
+      ...src,
+      deposits: { ...def.deposits, ...src?.deposits },
+      relations: { ...def.relations, ...src?.relations },
+      factions: { ...def.factions, ...src?.factions },
+      researchLevels: { ...def.researchLevels, ...src?.researchLevels },
+      extractionUnlocks: { ...def.extractionUnlocks, ...src?.extractionUnlocks },
+      breakthroughs: src?.breakthroughs ?? def.breakthroughs,
+    };
+  }
+
+  return {
+    ...defaults,
+    ...partial,
+    regions,
+    tileBuildings: partial.tileBuildings ?? defaults.tileBuildings,
+    tradeAgreements: partial.tradeAgreements ?? defaults.tradeAgreements,
+    transportRoutes: partial.transportRoutes ?? defaults.transportRoutes,
+    transitAgreements: partial.transitAgreements ?? defaults.transitAgreements,
+    transitRequests: partial.transitRequests ?? defaults.transitRequests,
+    highlightedRoutes: partial.highlightedRoutes ?? defaults.highlightedRoutes,
+    transportCapacityUsed: partial.transportCapacityUsed ?? defaults.transportCapacityUsed,
+    breakthroughProposal: partial.breakthroughProposal ?? defaults.breakthroughProposal,
+    combinedProjects: partial.combinedProjects ?? defaults.combinedProjects,
+    researchLicenses: partial.researchLicenses ?? defaults.researchLicenses,
+    cycleStartCo2: partial.cycleStartCo2 ?? defaults.cycleStartCo2,
+    cycleStartCarbonTax: partial.cycleStartCarbonTax ?? defaults.cycleStartCarbonTax,
+    previousCycleCo2: partial.previousCycleCo2 ?? defaults.previousCycleCo2,
+    summitVotes: partial.summitVotes ?? defaults.summitVotes,
+    activeSummitResolutions:
+      partial.activeSummitResolutions ?? defaults.activeSummitResolutions,
+    summitHistory: partial.summitHistory ?? defaults.summitHistory,
+    pendingSummitVote: partial.pendingSummitVote ?? defaults.pendingSummitVote,
+    summitComplianceResults:
+      partial.summitComplianceResults ?? defaults.summitComplianceResults,
+    summitComplianceAlerts:
+      partial.summitComplianceAlerts ?? defaults.summitComplianceAlerts,
+    cycleTradeOffers: partial.cycleTradeOffers ?? defaults.cycleTradeOffers,
+    cycleCompletedTransfers:
+      partial.cycleCompletedTransfers ?? defaults.cycleCompletedTransfers,
+    summitNonComplianceStrikes:
+      partial.summitNonComplianceStrikes ?? defaults.summitNonComplianceStrikes,
+    climateFinanceGiven: partial.climateFinanceGiven ?? defaults.climateFinanceGiven,
+    gapScoreHistory: partial.gapScoreHistory ?? defaults.gapScoreHistory,
+    happinessHistory: partial.happinessHistory ?? defaults.happinessHistory,
+    peakGreenRatio: partial.peakGreenRatio ?? defaults.peakGreenRatio,
+    peakGreenRatioCycle: partial.peakGreenRatioCycle ?? defaults.peakGreenRatioCycle,
+    factionCycleEvents: partial.factionCycleEvents ?? defaults.factionCycleEvents,
+    relationEvents: partial.relationEvents ?? defaults.relationEvents,
+    tradePartners: partial.tradePartners ?? defaults.tradePartners,
+    relationAlerts: partial.relationAlerts ?? defaults.relationAlerts,
+    climateFinanceThisCycle:
+      partial.climateFinanceThisCycle ?? defaults.climateFinanceThisCycle,
+  };
+}
+
 export function aggregateResources(regions: Record<CountryId, RegionState>): ResourceTotals {
   const totals: ResourceTotals = {
     money: 0, energy: 0, food: 0, population: 0,

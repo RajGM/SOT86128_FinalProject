@@ -205,8 +205,14 @@ export function ComparisonDashboard() {
   const [sortKey, setSortKey] = useState<SortKey>("rank");
   const [sortAsc, setSortAsc] = useState(true);
 
-  const rows = useMemo(() => computeAllCountryComparisons(gameState), [gameState]);
-  const pioneer = useMemo(() => getCurrentPioneer(rows), [rows]);
+  const rows = useMemo(
+    () => (comparisonOpen ? computeAllCountryComparisons(gameState) : []),
+    [gameState, comparisonOpen]
+  );
+  const pioneer = useMemo(
+    () => (rows.length > 0 ? getCurrentPioneer(rows) : null),
+    [rows]
+  );
   const playerRow = rows.find((r) => r.countryId === viewCountry) ?? rows[0];
 
   const sortedRows = useMemo(() => {
@@ -242,7 +248,7 @@ export function ComparisonDashboard() {
     }
   };
 
-  if (!comparisonOpen) return null;
+  if (!comparisonOpen || !pioneer || !playerRow) return null;
 
   const countryIds = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 

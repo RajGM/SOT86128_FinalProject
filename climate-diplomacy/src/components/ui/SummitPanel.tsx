@@ -24,7 +24,7 @@ export function SummitPanel() {
   const taxFloor = getCarbonTaxFloor(gameState, viewCountry);
 
   const myCompliance = summitComplianceResults.filter((c) => c.countryId === viewCountry);
-  const recentVotes = [...gameState.summitVotes].slice(-5).reverse();
+  const recentVotes = [...(gameState.summitVotes ?? [])].slice(-5).reverse();
 
   return (
     <div>

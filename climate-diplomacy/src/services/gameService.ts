@@ -22,6 +22,7 @@ import {
   assignCountriesToPlayers,
   createGameStateFromSettings,
 } from "../lib/gameBootstrap";
+import { hydrateGameState } from "../lib/gameState";
 import { buildPlayerResults } from "../lib/scoring";
 import { assignCountriesAtStart, updateRoomStatus } from "./roomService";
 
@@ -67,20 +68,27 @@ export async function startGame(
   return gameData;
 }
 
+function normalizeGameData(raw: GameData): GameData {
+  return {
+    ...raw,
+    gameState: hydrateGameState(raw.gameState),
+  };
+}
+
 export function subscribeGame(
   roomId: string,
   onUpdate: (game: GameData | null) => void
 ): Unsubscribe {
   const db = getFirebaseDb();
   return onValue(ref(db, `games/${roomId}`), (snap) => {
-    onUpdate(snap.exists() ? (snap.val() as GameData) : null);
+    onUpdate(snap.exists() ? normalizeGameData(snap.val() as GameData) : null);
   });
 }
 
 export async function getGame(roomId: string): Promise<GameData | null> {
   const db = getFirebaseDb();
   const snap = await get(ref(db, `games/${roomId}`));
-  return snap.exists() ? (snap.val() as GameData) : null;
+  return snap.exists() ? normalizeGameData(snap.val() as GameData) : null;
 }
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;

@@ -34,6 +34,7 @@ import {
 } from "../lib/relationMechanics";
 import {
   createInitialGameState,
+  hydrateGameState,
   getRegionForHex,
   co2TemperatureDelta,
   processCycle,
@@ -170,7 +171,10 @@ export function GameProvider({
   multiplayer?: MultiplayerConfig | null;
 }) {
   const [gameState, setGameStateInternal] = useState<GameState>(
-    () => initialState ?? createInitialGameState(hexes)
+    () =>
+      initialState
+        ? hydrateGameState(initialState, hexes)
+        : createInitialGameState(hexes)
   );
   const lastSyncedVersion = useRef(0);
   const skipNextSync = useRef(false);
@@ -181,8 +185,8 @@ export function GameProvider({
     if (multiplayer.syncedVersion <= lastSyncedVersion.current) return;
     lastSyncedVersion.current = multiplayer.syncedVersion;
     skipNextSync.current = true;
-    setGameStateInternal(multiplayer.syncedState);
-  }, [multiplayer?.syncedState, multiplayer?.syncedVersion]);
+    setGameStateInternal(hydrateGameState(multiplayer.syncedState, hexes));
+  }, [multiplayer?.syncedState, multiplayer?.syncedVersion, hexes]);
 
   const hexLookup = useMemo(() => createHexLookup(hexes), [hexes]);
   const [selectedHex, setSelectedHex] = useState<HexData | null>(null);
