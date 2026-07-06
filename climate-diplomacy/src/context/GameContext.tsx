@@ -82,6 +82,7 @@ import {
 
 interface GameContextValue {
   hexes: HexData[];
+  isTestScenario: boolean;
   gameState: GameState;
   selectedHex: HexData | null;
   setSelectedHex: (hex: HexData | null) => void;
@@ -133,8 +134,20 @@ interface GameContextValue {
 
 const GameContext = createContext<GameContextValue | null>(null);
 
-export function GameProvider({ hexes, children }: { hexes: HexData[]; children: ReactNode }) {
-  const [gameState, setGameState] = useState<GameState>(() => createInitialGameState(hexes));
+export function GameProvider({
+  hexes,
+  children,
+  initialState,
+  isTestScenario = false,
+}: {
+  hexes: HexData[];
+  children: ReactNode;
+  initialState?: GameState;
+  isTestScenario?: boolean;
+}) {
+  const [gameState, setGameState] = useState<GameState>(
+    () => initialState ?? createInitialGameState(hexes)
+  );
   const hexLookup = useMemo(() => createHexLookup(hexes), [hexes]);
   const [selectedHex, setSelectedHex] = useState<HexData | null>(null);
   const [viewCountry, setViewCountry] = useState<CountryId>("usa");
@@ -1003,6 +1016,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
     <GameContext.Provider
       value={{
         hexes,
+        isTestScenario,
         gameState,
         selectedHex,
         setSelectedHex: handleSetSelectedHex,

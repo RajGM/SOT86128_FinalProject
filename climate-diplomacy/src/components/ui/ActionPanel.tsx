@@ -4,6 +4,7 @@ import "./overlay.css";
 export function ActionPanel() {
   const {
     gameState,
+    isTestScenario,
     dashboardOpen,
     setDashboardOpen,
     buildPanelOpen,
@@ -14,6 +15,11 @@ export function ActionPanel() {
 
   return (
     <div className="action-panel">
+      {isTestScenario && (
+        <span className="test-scenario-badge" title="Cycle 15 mid-game classroom scenario">
+          Test Scenario — Cycle {gameState.cycle}
+        </span>
+      )}
       <button
         className={`overlay-btn ${dashboardOpen ? "active" : ""}`}
         onClick={() => setDashboardOpen(!dashboardOpen)}
