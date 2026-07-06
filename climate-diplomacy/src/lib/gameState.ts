@@ -44,6 +44,7 @@ import {
   isClimateFinanceTransfer,
   climateFinanceAmount,
 } from "./comparisonMetrics";
+import { processCarbonTaxCollection } from "./carbonTaxMechanics";
 import {
   applyTransitFeeRelation,
   getTransitCommissionMultiplier,
@@ -99,7 +100,9 @@ function createRegionState(id: CountryId): RegionState {
     breakthroughs: [],
     relations,
     factions: createInitialFactionState(),
-    carbonTax: 10,
+    carbonTax: 0,
+    carbonTaxRecycling: "dividend",
+    greenSubsidyPool: 0,
   };
 }
 
@@ -127,6 +130,9 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
     testingMode: true,
     cycleStartCo2: Object.fromEntries(
       ALL_COUNTRIES.map((id) => [id, regions[id].co2])
+    ) as Partial<Record<CountryId, number>>,
+    cycleStartCarbonTax: Object.fromEntries(
+      ALL_COUNTRIES.map((id) => [id, regions[id].carbonTax])
     ) as Partial<Record<CountryId, number>>,
     previousCycleCo2: Object.fromEntries(
       ALL_COUNTRIES.map((id) => [id, regions[id].co2])
@@ -328,6 +334,7 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   let tradeAgreements = [...prev.tradeAgreements];
   let globalTemperature = prev.globalTemperature;
   let cycleCo2 = 0;
+  const cycleCo2ByCountry: Partial<Record<CountryId, number>> = {};
   let lastFactionTempThreshold = prev.lastFactionTempThreshold;
   const prevTemperature = prev.globalTemperature;
   let factionCycleEvents = { ...prev.factionCycleEvents };
@@ -408,7 +415,11 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
       );
       if (Object.keys(yields).length > 0) {
         region = applyEffectsToRegion(region, yields);
-        cycleCo2 += yields.co2 ?? 0;
+        const co2Delta = yields.co2 ?? 0;
+        if (co2Delta > 0) {
+          cycleCo2 += co2Delta;
+          cycleCo2ByCountry[id] = (cycleCo2ByCountry[id] ?? 0) + co2Delta;
+        }
       }
     }
 
@@ -417,7 +428,11 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
       const costs = computeBuildingCosts(building, workforceIdle, materialIdle);
       if (Object.keys(costs).length > 0) {
         region = applyEffectsToRegion(region, costs);
-        cycleCo2 += costs.co2 ?? 0;
+        const co2Delta = costs.co2 ?? 0;
+        if (co2Delta > 0) {
+          cycleCo2 += co2Delta;
+          cycleCo2ByCountry[id] = (cycleCo2ByCountry[id] ?? 0) + co2Delta;
+        }
       }
     }
 
@@ -438,6 +453,7 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
         [trade.from]: { ...fromRegion, co2: fromRegion.co2 + co2 },
       };
       cycleCo2 += co2;
+      cycleCo2ByCountry[trade.from] = (cycleCo2ByCountry[trade.from] ?? 0) + co2;
     }
 
     transportCapacityUsed = {
@@ -550,6 +566,22 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     }
   }
 
+  // 8b. Carbon tax collection and recycling (before temperature update)
+  const carbonTaxResult = processCarbonTaxCollection(
+    regions,
+    cycleCo2ByCountry,
+    climateFinanceGiven,
+    climateFinanceThisCycle,
+    relationEvents,
+    relationAlerts,
+    prev.cycle
+  );
+  regions = carbonTaxResult.regions;
+  climateFinanceGiven = carbonTaxResult.climateFinanceGiven;
+  climateFinanceThisCycle = carbonTaxResult.climateFinanceThisCycle;
+  relationEvents = carbonTaxResult.relationEvents;
+  relationAlerts = carbonTaxResult.relationAlerts;
+
   // 8–9. CO₂ sum → temperature
   globalTemperature += co2TemperatureDelta(cycleCo2);
 
@@ -610,12 +642,17 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     const percents = computeFactionPercents(profile, counts);
 
     const startCo2 = prev.cycleStartCo2[id] ?? region.co2;
+    const startTax = prev.cycleStartCarbonTax[id];
+    const taxDelta =
+      startTax !== undefined ? region.carbonTax - startTax : 0;
     const events = {
       ...(factionCycleEvents[id] ?? createEmptyFactionCycleEvents()),
       co2Increased: region.co2 > startCo2,
       co2Decreased: region.co2 < startCo2,
       moneySurplus: region.money > FACTION_MONEY_SURPLUS_THRESHOLD,
       temperatureThresholdCrossed: tempCrossing.crossed,
+      carbonTaxIncrease: taxDelta > 0 ? taxDelta : 0,
+      carbonTaxDecrease: taxDelta < 0 ? Math.abs(taxDelta) : 0,
     };
 
     const updatedFactions = applyFactionSatisfactionChanges(region.factions, events);
@@ -705,6 +742,9 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     gapScoreHistory,
     cycleStartCo2: Object.fromEntries(
       ALL_COUNTRIES.map((id) => [id, regions[id].co2])
+    ) as Partial<Record<CountryId, number>>,
+    cycleStartCarbonTax: Object.fromEntries(
+      ALL_COUNTRIES.map((id) => [id, regions[id].carbonTax])
     ) as Partial<Record<CountryId, number>>,
     previousCycleCo2: Object.fromEntries(
       ALL_COUNTRIES.map((id) => [id, regions[id].co2])

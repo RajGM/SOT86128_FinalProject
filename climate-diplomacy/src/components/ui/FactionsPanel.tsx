@@ -5,7 +5,12 @@ import {
   countFactionBuildings,
   FACTION_SATISFACTION_BASE,
 } from "../../lib/factionMechanics";
+import {
+  CARBON_TAX_RECYCLING_OPTIONS,
+  calculateTaxCollected,
+} from "../../lib/carbonTaxMechanics";
 import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
+import type { CarbonTaxRecycling } from "../../types/game";
 
 function satisfactionColor(value: number): string {
   if (value >= 70) return "#22c55e";
@@ -19,6 +24,7 @@ export function FactionsPanel() {
     gameState,
     viewCountry,
     setCarbonTax,
+    setCarbonTaxRecycling,
     recordSummitVote,
   } = useGame();
 
@@ -34,6 +40,18 @@ export function FactionsPanel() {
       percents.greenPercent * greenSatisfaction) /
     100;
   const happinessDelta = Math.round(modifier - FACTION_SATISFACTION_BASE);
+
+  const cycleStartTax = gameState.cycleStartCarbonTax[viewCountry] ?? region.carbonTax;
+  const taxChangedThisCycle = region.carbonTax !== cycleStartTax;
+  const climateFinanceSent = gameState.climateFinanceGiven[viewCountry] ?? 0;
+
+  const prevCo2 = gameState.previousCycleCo2[viewCountry] ?? region.co2;
+  const lastCycleEmissions = Math.max(0, region.co2 - prevCo2);
+  const projectedTax = calculateTaxCollected(lastCycleEmissions, region.carbonTax);
+
+  const recyclingOption = CARBON_TAX_RECYCLING_OPTIONS.find(
+    (o) => o.id === region.carbonTaxRecycling
+  );
 
   return (
     <div>
@@ -104,23 +122,92 @@ export function FactionsPanel() {
 
       <div className="section-title">Carbon Tax</div>
       <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span>Rate: <strong>{region.carbonTax}</strong>/100</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <span style={{ minWidth: 72 }}>
+            Rate: <strong>{region.carbonTax}</strong>/100
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={region.carbonTax}
+            onChange={(e) => setCarbonTax(viewCountry, Number(e.target.value))}
+            style={{ flex: 1, accentColor: "#3b82f6" }}
+          />
           <button
             className="overlay-btn"
             onClick={() => setCarbonTax(viewCountry, region.carbonTax - 5)}
+            disabled={region.carbonTax <= 0}
           >
             −5
           </button>
           <button
             className="overlay-btn"
             onClick={() => setCarbonTax(viewCountry, region.carbonTax + 5)}
+            disabled={region.carbonTax >= 100}
           >
             +5
           </button>
         </div>
-        <p style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginTop: 6 }}>
-          Raising tax pleases green factions, angers brown. Applied at next cycle end.
+
+        <label style={{ display: "block", fontSize: 11, marginBottom: 4, color: "rgba(255,255,255,0.7)" }}>
+          Revenue recycling
+        </label>
+        <select
+          className="overlay-select"
+          value={region.carbonTaxRecycling}
+          onChange={(e) => setCarbonTaxRecycling(viewCountry, e.target.value as CarbonTaxRecycling)}
+          style={{
+            width: "100%",
+            marginBottom: 8,
+            background: "rgba(0,0,0,0.35)",
+            color: "#fff",
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 4,
+            padding: "6px 8px",
+            fontSize: 11,
+          }}
+        >
+          {CARBON_TAX_RECYCLING_OPTIONS.map((opt) => (
+            <option key={opt.id} value={opt.id}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+
+        {recyclingOption && (
+          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", margin: "0 0 8px" }}>
+            {recyclingOption.description}
+          </p>
+        )}
+
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", display: "grid", gap: 4 }}>
+          <span>
+            Est. collection next cycle: <strong>{projectedTax}</strong> money
+            {lastCycleEmissions > 0 && ` (${lastCycleEmissions} CO₂ × ${region.carbonTax}%)`}
+          </span>
+          {region.greenSubsidyPool > 0 && (
+            <span>
+              Green subsidy pool: <strong style={{ color: "#22c55e" }}>{region.greenSubsidyPool}</strong>
+            </span>
+          )}
+          {climateFinanceSent > 0 && (
+            <span>
+              Climate finance given (total): <strong>{climateFinanceSent}</strong>
+            </span>
+          )}
+          {taxChangedThisCycle && (
+            <span style={{ color: "#eab308" }}>
+              Tax changed this cycle — faction effects apply at cycle end
+            </span>
+          )}
+        </div>
+
+        <p style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 8, marginBottom: 0 }}>
+          Tax is levied on this cycle&apos;s emissions (buildings + transport). Does not reduce CO₂
+          directly — replace fossil infrastructure to cut emissions. Adjust rate and recycling before
+          advancing the cycle.
         </p>
       </div>
 
@@ -154,7 +241,8 @@ export function FactionSummaryChip({ countryId }: { countryId: CountryId }) {
     profile,
     countFactionBuildings(buildings, countryId)
   );
-  const { brownSatisfaction, greenSatisfaction } = gameState.regions[countryId].factions;
+  const region = gameState.regions[countryId];
+  const { brownSatisfaction, greenSatisfaction } = region.factions;
 
   return (
     <span style={{ fontSize: 10, color: "rgba(255,255,255,0.55)" }}>
@@ -162,6 +250,12 @@ export function FactionSummaryChip({ countryId }: { countryId: CountryId }) {
       <span style={{ color: "#f97316" }}>{percents.brownPercent}%B ({brownSatisfaction})</span>
       {" / "}
       <span style={{ color: "#22c55e" }}>{percents.greenPercent}%G ({greenSatisfaction})</span>
+      {region.carbonTax > 0 && (
+        <>
+          {" · "}
+          <span style={{ color: "#3b82f6" }}>Tax {region.carbonTax}%</span>
+        </>
+      )}
     </span>
   );
 }

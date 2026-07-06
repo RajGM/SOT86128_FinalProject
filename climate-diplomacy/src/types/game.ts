@@ -192,6 +192,8 @@ export interface RegionProfile {
   };
 }
 
+export type CarbonTaxRecycling = "dividend" | "subsidy" | "finance";
+
 export interface RegionState {
   money: number;
   energy: number;
@@ -208,8 +210,12 @@ export interface RegionState {
   breakthroughs: string[];
   relations: Partial<Record<CountryId, number>>;
   factions: FactionState;
-  /** Domestic carbon tax rate (0–100); changes affect faction satisfaction. */
+  /** Domestic carbon tax rate (0–100, increments of 5); changes affect faction satisfaction. */
   carbonTax: number;
+  /** Where collected tax revenue is recycled each cycle. */
+  carbonTaxRecycling: CarbonTaxRecycling;
+  /** Accumulated green/nuclear build subsidy from tax recycling. */
+  greenSubsidyPool: number;
 }
 
 export interface TradeAgreement {
@@ -349,6 +355,8 @@ export interface GameState {
   testingMode: boolean;
   /** CO₂ at start of current cycle — used for faction satisfaction deltas. */
   cycleStartCo2: Partial<Record<CountryId, number>>;
+  /** Carbon tax rate at start of current cycle — used for faction satisfaction deltas. */
+  cycleStartCarbonTax: Partial<Record<CountryId, number>>;
   /** CO₂ at end of previous cycle — used for comparison dashboard trend metric. */
   previousCycleCo2: Partial<Record<CountryId, number>>;
   /** Summit vote history for cooperation scoring. */

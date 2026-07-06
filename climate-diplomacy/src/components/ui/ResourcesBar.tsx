@@ -147,6 +147,22 @@ export function ResourcesBar() {
                   <div style={{ marginTop: 4 }}>
                     <FactionSummaryChip countryId={id} />
                   </div>
+                  {(r.carbonTax > 0 || r.greenSubsidyPool > 0) && (
+                    <div style={{ marginTop: 4, fontSize: 10, color: "rgba(255,255,255,0.5)" }}>
+                      {r.carbonTax > 0 && (
+                        <span>
+                          Carbon tax: <strong style={{ color: "#3b82f6" }}>{r.carbonTax}%</strong>
+                          {" · "}{r.carbonTaxRecycling}
+                        </span>
+                      )}
+                      {r.greenSubsidyPool > 0 && (
+                        <span>
+                          {r.carbonTax > 0 && " · "}
+                          Subsidy pool: <strong style={{ color: "#22c55e" }}>{r.greenSubsidyPool}</strong>
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexWrap: "wrap", gap: "4px 10px", color: "rgba(255,255,255,0.6)" }}>
                     {RESOURCE_DEPOSITS.map((dep) => (
                       <span key={dep}>

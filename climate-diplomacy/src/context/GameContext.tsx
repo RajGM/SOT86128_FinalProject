@@ -8,6 +8,7 @@ import type {
   TradeItem,
   TradeMode,
   TransitFeeModel,
+  CarbonTaxRecycling,
 } from "../types/game";
 import {
   applyClimateFinanceGivenRelation,
@@ -39,8 +40,6 @@ import {
   getDemolishCost,
   getUpgradeCost,
   getUpgradeTechCost,
-  canAffordBuild,
-  canAffordUpgrade,
   canUpgradeTier,
   canPostTier3Upgrade,
   getPostTier3UpgradeCost,
@@ -63,6 +62,10 @@ import {
   createEmptyFactionCycleEvents,
   recordBuildFactionEvent,
 } from "../lib/factionMechanics";
+import {
+  resolveSubsidizedMoneyCost,
+  snapCarbonTaxRate,
+} from "../lib/carbonTaxMechanics";
 
 interface GameContextValue {
   hexes: HexData[];
@@ -107,6 +110,7 @@ interface GameContextValue {
   advanceCycle: () => void;
   dismissRelationAlerts: () => void;
   setCarbonTax: (countryId: CountryId, newRate: number) => void;
+  setCarbonTaxRecycling: (countryId: CountryId, recycling: CarbonTaxRecycling) => void;
   recordSummitVote: (countryId: CountryId, votedYes: boolean) => void;
   highlightFacilityRoutes: (countryId: CountryId) => void;
   clearHighlightedRoutes: () => void;
@@ -144,8 +148,11 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
 
       setGameState((prev) => {
         const region = prev.regions[regionId];
+        const baseCost = getBuildCost(build, tier);
+        const techCost = getBuildTechCost(build, tier);
+        const { cost, greenSubsidyPool } = resolveSubsidizedMoneyCost(region, type, baseCost);
+        if (region.money < cost || region.technology < techCost) return prev;
         if (prev.tileBuildings[key]) return prev;
-        if (!canAffordBuild(region.money, region.technology, build, tier)) return prev;
 
         const placement = canBuildOnTile(
           selectedHex,
@@ -164,9 +171,6 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           placed.countryId = regionId;
         }
 
-        const cost = getBuildCost(build, tier);
-        const techCost = getBuildTechCost(build, tier);
-
         const prevEvents = prev.factionCycleEvents[regionId] ?? createEmptyFactionCycleEvents();
         const buildEvents = recordBuildFactionEvent(prevEvents, type);
 
@@ -183,6 +187,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
               ...region,
               money: region.money - cost,
               technology: region.technology - techCost,
+              greenSubsidyPool,
             },
           },
         };
@@ -249,7 +254,12 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
       if (upgradeCost === null) return prev;
 
       const region = prev.regions[regionId];
-      if (!canAffordUpgrade(region.money, region.technology, build, existing.tier)) return prev;
+      const { cost: subsidizedUpgradeCost, greenSubsidyPool } = resolveSubsidizedMoneyCost(
+        region,
+        existing.type,
+        upgradeCost
+      );
+      if (region.money < subsidizedUpgradeCost || region.technology < upgradeTechCost) return prev;
 
       const nextTier = (existing.tier + 1) as 2 | 3;
 
@@ -268,8 +278,9 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           ...prev.regions,
           [regionId]: {
             ...region,
-            money: region.money - upgradeCost,
+            money: region.money - subsidizedUpgradeCost,
             technology: region.technology - upgradeTechCost,
+            greenSubsidyPool,
           },
         },
       };
@@ -767,16 +778,8 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
   const setCarbonTax = useCallback((countryId: CountryId, newRate: number) => {
     setGameState((prev) => {
       const region = prev.regions[countryId];
-      const clamped = Math.max(0, Math.min(100, newRate));
-      const delta = clamped - region.carbonTax;
-      if (delta === 0) return prev;
-
-      const prevEvents = prev.factionCycleEvents[countryId] ?? createEmptyFactionCycleEvents();
-      const events = {
-        ...prevEvents,
-        carbonTaxIncrease: delta > 0 ? prevEvents.carbonTaxIncrease + delta : prevEvents.carbonTaxIncrease,
-        carbonTaxDecrease: delta < 0 ? prevEvents.carbonTaxDecrease + Math.abs(delta) : prevEvents.carbonTaxDecrease,
-      };
+      const clamped = snapCarbonTaxRate(newRate);
+      if (clamped === region.carbonTax) return prev;
 
       return {
         ...prev,
@@ -784,9 +787,20 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           ...prev.regions,
           [countryId]: { ...region, carbonTax: clamped },
         },
-        factionCycleEvents: {
-          ...prev.factionCycleEvents,
-          [countryId]: events,
+      };
+    });
+  }, []);
+
+  const setCarbonTaxRecycling = useCallback((countryId: CountryId, recycling: CarbonTaxRecycling) => {
+    setGameState((prev) => {
+      const region = prev.regions[countryId];
+      if (region.carbonTaxRecycling === recycling) return prev;
+
+      return {
+        ...prev,
+        regions: {
+          ...prev.regions,
+          [countryId]: { ...region, carbonTaxRecycling: recycling },
         },
       };
     });
@@ -896,6 +910,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         proposeTrade,
         advanceCycle,
         setCarbonTax,
+        setCarbonTaxRecycling,
         recordSummitVote,
         respondTransitRequest,
         cancelTransit,
