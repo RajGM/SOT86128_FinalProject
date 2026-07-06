@@ -18,7 +18,7 @@ export function ActionPanel() {
         className={`overlay-btn ${dashboardOpen ? "active" : ""}`}
         onClick={() => setDashboardOpen(!dashboardOpen)}
       >
-        Actions — Technology / Diplomacy / Trade / Routes
+        Actions — Technology / Diplomacy / Trade / Routes / Summit
       </button>
       {selectedHex && (
         <button
@@ -32,7 +32,13 @@ export function ActionPanel() {
         <button
           className="overlay-btn"
           onClick={advanceCycle}
+          disabled={!!gameState.pendingSummitVote}
           style={{ marginLeft: 8 }}
+          title={
+            gameState.pendingSummitVote
+              ? "Complete the summit vote before advancing"
+              : undefined
+          }
         >
           Advance Cycle ({gameState.cycle})
         </button>

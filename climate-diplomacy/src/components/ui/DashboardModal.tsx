@@ -3,6 +3,7 @@ import { TechnologyPanel } from "./TechnologyPanel";
 import { DiplomacyPanel } from "./DiplomacyPanel";
 import { TradePanel } from "./TradePanel";
 import { RoutesPanel } from "./RoutesPanel";
+import { SummitPanel } from "./SummitPanel";
 import "./overlay.css";
 
 export function DashboardModal() {
@@ -19,13 +20,13 @@ export function DashboardModal() {
         </div>
 
         <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-          {(["technology", "diplomacy", "trade", "routes"] as const).map((tab) => (
+          {(["technology", "diplomacy", "trade", "routes", "summit"] as const).map((tab) => (
             <button
               key={tab}
               className={`tab-btn ${dashboardTab === tab ? "active" : ""}`}
               onClick={() => setDashboardTab(tab)}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === "summit" ? "Summit" : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
@@ -35,6 +36,7 @@ export function DashboardModal() {
           {dashboardTab === "diplomacy" && <DiplomacyPanel />}
           {dashboardTab === "trade" && <TradePanel />}
           {dashboardTab === "routes" && <RoutesPanel />}
+          {dashboardTab === "summit" && <SummitPanel />}
         </div>
       </div>
     </div>

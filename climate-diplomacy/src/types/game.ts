@@ -165,6 +165,7 @@ export interface FactionCycleEvents {
   carbonTaxDecrease: number;
   votedYesEmissionLimits: boolean;
   votedNoEmissionLimits: boolean;
+  summitNonCompliance: boolean;
   co2Increased: boolean;
   co2Decreased: boolean;
   moneySurplus: boolean;
@@ -299,6 +300,7 @@ export type RelationEventType =
   | "transit_cancelled"
   | "summit_same_vote"
   | "summit_opposite_vote"
+  | "summit_non_compliance"
   | "top_emitter_damage"
   | "co2_decreased"
   | "climate_finance_given"
@@ -325,9 +327,72 @@ export interface RelationAlert {
 
 export type SummitVoteChoice = "yes" | "no" | "abstain";
 
+export type SummitBoundaryType =
+  | "temperature"
+  | "co2_concentration"
+  | "human_development"
+  | "inequality"
+  | "political_stability";
+
+export interface SummitResolution {
+  id: string;
+  cycle: number;
+  boundaryType: SummitBoundaryType;
+  resolutionText: string;
+  threshold: number;
+  reductionPercent?: number;
+  severityLevel?: number;
+  targetCountries: CountryId[];
+  votes: Partial<Record<CountryId, SummitVoteChoice>>;
+  passed: boolean;
+  baselineCo2?: Partial<Record<CountryId, number>>;
+  complianceDeadline?: number;
+  carbonTaxCeilingAtPassage?: Partial<Record<CountryId, number>>;
+  tradeRestrictionsSuspendedUntil?: number;
+  expiresOnSafe?: boolean;
+  active: boolean;
+}
+
+export interface ComplianceResult {
+  countryId: CountryId;
+  resolutionId: string;
+  compliant: boolean;
+  reason: string;
+}
+
+export interface PendingSummitVote {
+  cycle: number;
+  boundaryType: SummitBoundaryType;
+  resolutionText: string;
+  threshold: number;
+  reductionPercent?: number;
+  severityLevel?: number;
+  targetCountries: CountryId[] | "all";
+  votes: Partial<Record<CountryId, SummitVoteChoice>>;
+  deadlineAt: number;
+}
+
+export interface CycleTradeOffer {
+  from: CountryId;
+  to: CountryId;
+  item: TradeItem;
+  amount: number;
+  cycle: number;
+}
+
+export interface CycleCompletedTransfer {
+  from: CountryId;
+  to: CountryId;
+  item: TradeItem;
+  amount: number;
+  cycle: number;
+}
+
 export interface SummitVoteRecord {
   cycle: number;
   resolution: string;
+  boundaryType?: SummitBoundaryType;
+  passed?: boolean;
   votes: Partial<Record<CountryId, SummitVoteChoice>>;
 }
 
@@ -361,6 +426,26 @@ export interface GameState {
   previousCycleCo2: Partial<Record<CountryId, number>>;
   /** Summit vote history for cooperation scoring. */
   summitVotes: SummitVoteRecord[];
+  /** Currently active passed resolutions with compliance tracking. */
+  activeSummitResolutions: SummitResolution[];
+  /** All resolutions (passed and failed) for dashboard history. */
+  summitHistory: SummitResolution[];
+  /** Pending vote awaiting player input (boundary breach this cycle). */
+  pendingSummitVote: PendingSummitVote | null;
+  /** Latest per-country compliance results from last cycle check. */
+  summitComplianceResults: ComplianceResult[];
+  /** Non-compliance alert messages for UI. */
+  summitComplianceAlerts: string[];
+  /** Peak global population for stability boundary. */
+  peakGlobalPopulation: number;
+  /** Trade offers created this cycle (human development compliance). */
+  cycleTradeOffers: CycleTradeOffer[];
+  /** Completed transfers this cycle (inequality/stability compliance). */
+  cycleCompletedTransfers: CycleCompletedTransfer[];
+  /** Cycle until which trade blocks (relations < 20) are suspended. */
+  tradeRestrictionSuspensionUntil: number;
+  /** Cumulative non-compliance strikes per country (dashboard metric). */
+  summitNonComplianceStrikes: Partial<Record<CountryId, number>>;
   /** Cumulative money + technology sent to developing countries (comparison dashboard). */
   climateFinanceGiven: Partial<Record<CountryId, number>>;
   /** Composite gap score per cycle for historical trend chart. */

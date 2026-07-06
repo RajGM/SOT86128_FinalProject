@@ -18,8 +18,9 @@ export const GREEN_SUBSIDY_MAX_DISCOUNT_RATIO = 0.5;
 
 const GREEN_SUBSIDY_BUILD_TYPES = new Set<BuildType>(["green_plant", "nuclear_plant"]);
 
-export function snapCarbonTaxRate(rate: number): number {
-  return Math.max(0, Math.min(100, Math.round(rate / 5) * 5));
+export function snapCarbonTaxRate(rate: number, floor = 0, ceiling = 100): number {
+  const clamped = Math.max(floor, Math.min(ceiling, Math.round(rate / 5) * 5));
+  return Math.max(0, Math.min(100, clamped));
 }
 
 export function calculateTaxCollected(nationalCo2ThisCycle: number, carbonTaxRate: number): number {

@@ -13,6 +13,7 @@ import {
   RELATION_ALLIED_THRESHOLD,
   RELATION_TRADE_THRESHOLD,
 } from "../../lib/relationMechanics";
+import { isTradeRestrictionSuspended } from "../../lib/summitMechanics";
 
 export function TradePanel() {
   const { gameState, viewCountry, proposeTrade, getRoutePreview, getTransportCapacity, cancelTrade } = useGame();
@@ -36,7 +37,13 @@ export function TradePanel() {
     ? getTradeTransportUnits(gameState.regions, viewCountry, partner, amount)
     : 0;
   const relScore = gameState.regions[partner].relations[viewCountry] ?? 50;
-  const relBlocked = !canInitiateTrade(gameState.regions, viewCountry, partner);
+  const tradeSuspended = isTradeRestrictionSuspended(gameState, gameState.cycle);
+  const relBlocked = !canInitiateTrade(
+    gameState.regions,
+    viewCountry,
+    partner,
+    tradeSuspended
+  );
   const alliedDiscount =
     (gameState.regions[viewCountry].relations[partner] ?? 50) >= RELATION_ALLIED_THRESHOLD &&
     relScore >= RELATION_ALLIED_THRESHOLD;

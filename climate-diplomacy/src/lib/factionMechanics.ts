@@ -101,6 +101,7 @@ export function createEmptyFactionCycleEvents(): FactionCycleEvents {
     carbonTaxDecrease: 0,
     votedYesEmissionLimits: false,
     votedNoEmissionLimits: false,
+    summitNonCompliance: false,
     co2Increased: false,
     co2Decreased: false,
     moneySurplus: false,
@@ -184,6 +185,7 @@ export function applyFactionSatisfactionChanges(
 
   if (events.moneySurplus) brown += 2;
   if (events.temperatureThresholdCrossed) green -= 3;
+  if (events.summitNonCompliance) green -= 5;
 
   return {
     brownSatisfaction: clampSatisfaction(Math.round(brown)),

@@ -9,6 +9,7 @@ import {
   CARBON_TAX_RECYCLING_OPTIONS,
   calculateTaxCollected,
 } from "../../lib/carbonTaxMechanics";
+import { getCarbonTaxCeiling, getCarbonTaxFloor } from "../../lib/summitMechanics";
 import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
 import type { CarbonTaxRecycling } from "../../types/game";
 
@@ -25,7 +26,6 @@ export function FactionsPanel() {
     viewCountry,
     setCarbonTax,
     setCarbonTaxRecycling,
-    recordSummitVote,
   } = useGame();
 
   const profile = REGION_PROFILES[viewCountry];
@@ -52,6 +52,9 @@ export function FactionsPanel() {
   const recyclingOption = CARBON_TAX_RECYCLING_OPTIONS.find(
     (o) => o.id === region.carbonTaxRecycling
   );
+
+  const taxFloor = getCarbonTaxFloor(gameState, viewCountry);
+  const taxCeiling = getCarbonTaxCeiling(gameState, viewCountry);
 
   return (
     <div>
@@ -128,8 +131,8 @@ export function FactionsPanel() {
           </span>
           <input
             type="range"
-            min={0}
-            max={100}
+            min={taxFloor}
+            max={taxCeiling ?? 100}
             step={5}
             value={region.carbonTax}
             onChange={(e) => setCarbonTax(viewCountry, Number(e.target.value))}
@@ -138,18 +141,29 @@ export function FactionsPanel() {
           <button
             className="overlay-btn"
             onClick={() => setCarbonTax(viewCountry, region.carbonTax - 5)}
-            disabled={region.carbonTax <= 0}
+            disabled={region.carbonTax <= taxFloor}
           >
             −5
           </button>
           <button
             className="overlay-btn"
             onClick={() => setCarbonTax(viewCountry, region.carbonTax + 5)}
-            disabled={region.carbonTax >= 100}
+            disabled={region.carbonTax >= (taxCeiling ?? 100)}
           >
             +5
           </button>
         </div>
+
+        {taxFloor > 0 && (
+          <p style={{ fontSize: 10, color: "#3b82f6", margin: "0 0 8px" }}>
+            Summit floor: minimum rate {taxFloor} while temperature resolution is active.
+          </p>
+        )}
+        {taxCeiling !== null && (
+          <p style={{ fontSize: 10, color: "#eab308", margin: "0 0 8px" }}>
+            Stability freeze: cannot raise above {taxCeiling} this cycle.
+          </p>
+        )}
 
         <label style={{ display: "block", fontSize: 11, marginBottom: 4, color: "rgba(255,255,255,0.7)" }}>
           Revenue recycling
@@ -206,28 +220,9 @@ export function FactionsPanel() {
 
         <p style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 8, marginBottom: 0 }}>
           Tax is levied on this cycle&apos;s emissions (buildings + transport). Does not reduce CO₂
-          directly — replace fossil infrastructure to cut emissions. Adjust rate and recycling before
-          advancing the cycle.
+          directly — replace fossil infrastructure to cut emissions. Summit votes and compliance
+          are on the Dashboard → Summit tab.
         </p>
-      </div>
-
-      <div className="section-title">Summit — Emission Limits Vote</div>
-      <div className="card" style={{ display: "flex", gap: 8 }}>
-        <button
-          className="overlay-btn primary"
-          onClick={() => recordSummitVote(viewCountry, true)}
-        >
-          Vote YES
-        </button>
-        <button
-          className="overlay-btn danger"
-          onClick={() => recordSummitVote(viewCountry, false)}
-        >
-          Vote NO
-        </button>
-        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", alignSelf: "center" }}>
-          Record vote for this cycle (processed at cycle end)
-        </span>
       </div>
     </div>
   );

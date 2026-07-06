@@ -98,7 +98,8 @@ export function countEnergyBuildings(
 
 export function computeSummitYesPercent(
   countryId: CountryId,
-  summitVotes: SummitVoteRecord[]
+  summitVotes: SummitVoteRecord[],
+  nonComplianceStrikes = 0
 ): number {
   let yesScore = 0;
   let total = 0;
@@ -109,7 +110,9 @@ export function computeSummitYesPercent(
     if (vote === "yes") yesScore += 1;
     else if (vote === "abstain") yesScore += 0.5;
   }
-  return total > 0 ? yesScore / total : 0;
+  const base = total > 0 ? yesScore / total : 0;
+  const penalty = Math.min(0.5, nonComplianceStrikes * 0.05);
+  return Math.max(0, base - penalty);
 }
 
 export function isClimateFinanceTransfer(to: CountryId, item: TradeItem): boolean {
@@ -134,7 +137,11 @@ export function computeCountryRawMetrics(
     greenRatio: green / Math.max(total, 1),
     carbonTax: region.carbonTax,
     co2Trend: region.co2 - prevCo2,
-    summitVotes: computeSummitYesPercent(countryId, state.summitVotes),
+    summitVotes: computeSummitYesPercent(
+      countryId,
+      state.summitVotes,
+      state.summitNonComplianceStrikes[countryId] ?? 0
+    ),
     climateFinance: state.climateFinanceGiven[countryId] ?? 0,
   };
 }

@@ -9,11 +9,12 @@ import type {
   TradeMode,
   TransitFeeModel,
   CarbonTaxRecycling,
+  SummitVoteChoice,
 } from "../types/game";
 import {
   applyClimateFinanceGivenRelation,
   applyOneSidedRelation,
-  applySummitVoteRelations,
+  applyAllSummitVoteRelations,
   applyTradeRelationEffects,
   applyTransitApprovedRelations,
   canInitiateTrade,
@@ -66,6 +67,18 @@ import {
   resolveSubsidizedMoneyCost,
   snapCarbonTaxRate,
 } from "../lib/carbonTaxMechanics";
+import {
+  activateResolution,
+  computeBotVote,
+  getCarbonTaxCeiling,
+  getCarbonTaxFloor,
+  isCeilingResolution,
+  isTradeRestrictionSuspended,
+  recordCompletedTransfer,
+  recordTradeOffer,
+  replaceSupersededResolutions,
+  tallySummitVote,
+} from "../lib/summitMechanics";
 
 interface GameContextValue {
   hexes: HexData[];
@@ -77,9 +90,9 @@ interface GameContextValue {
   resourcesExpanded: boolean;
   toggleResourcesExpanded: () => void;
   dashboardOpen: boolean;
-  dashboardTab: "technology" | "diplomacy" | "trade" | "routes";
+  dashboardTab: "technology" | "diplomacy" | "trade" | "routes" | "summit";
   setDashboardOpen: (open: boolean) => void;
-  setDashboardTab: (tab: "technology" | "diplomacy" | "trade" | "routes") => void;
+  setDashboardTab: (tab: "technology" | "diplomacy" | "trade" | "routes" | "summit") => void;
   comparisonOpen: boolean;
   setComparisonOpen: (open: boolean) => void;
   buildPanelOpen: boolean;
@@ -111,7 +124,9 @@ interface GameContextValue {
   dismissRelationAlerts: () => void;
   setCarbonTax: (countryId: CountryId, newRate: number) => void;
   setCarbonTaxRecycling: (countryId: CountryId, recycling: CarbonTaxRecycling) => void;
-  recordSummitVote: (countryId: CountryId, votedYes: boolean) => void;
+  castSummitVote: (countryId: CountryId, choice: SummitVoteChoice) => void;
+  autoVoteSummitBots: () => void;
+  finalizeSummitVote: () => void;
   highlightFacilityRoutes: (countryId: CountryId) => void;
   clearHighlightedRoutes: () => void;
 }
@@ -125,7 +140,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
   const [viewCountry, setViewCountry] = useState<CountryId>("usa");
   const [resourcesExpanded, setResourcesExpanded] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
-  const [dashboardTab, setDashboardTab] = useState<"technology" | "diplomacy" | "trade" | "routes">("technology");
+  const [dashboardTab, setDashboardTab] = useState<"technology" | "diplomacy" | "trade" | "routes" | "summit">("technology");
   const [comparisonOpen, setComparisonOpen] = useState(false);
   const [buildPanelOpen, setBuildPanelOpen] = useState(false);
 
@@ -372,7 +387,12 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         let relationEvents = [...prev.relationEvents];
         let relationAlerts = [...prev.relationAlerts];
 
-        if (!canInitiateTrade(regions, from, to)) {
+        if (!canInitiateTrade(
+          regions,
+          from,
+          to,
+          isTradeRestrictionSuspended(prev, prev.cycle)
+        )) {
           const toName = COUNTRY_CONFIGS[to].name;
           const rejectResult = applyOneSidedRelation(
             regions,
@@ -492,11 +512,28 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           }
 
           let climateFinanceThisCycle = { ...prev.climateFinanceThisCycle };
+          let cycleCompletedTransfers = [...prev.cycleCompletedTransfers];
+          let cycleTradeOffers = [...prev.cycleTradeOffers];
+
           if (shouldApplyClimateFinanceRelation(to, item)) {
             climateFinanceThisCycle = {
               ...climateFinanceThisCycle,
               [from]: (climateFinanceThisCycle[from] ?? 0) + amount,
             };
+          }
+
+          if (item === "food" || item === "energy" || item === "money" || item === "technology") {
+            cycleTradeOffers = recordTradeOffer(cycleTradeOffers, from, to, item, amount, prev.cycle);
+          }
+          if (transferred && (item === "money" || item === "technology" || item === "food" || item === "energy")) {
+            cycleCompletedTransfers = recordCompletedTransfer(
+              cycleCompletedTransfers,
+              from,
+              to,
+              item,
+              amount,
+              prev.cycle
+            );
           }
 
           return {
@@ -517,6 +554,8 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
               amount
             ),
             climateFinanceThisCycle,
+            cycleTradeOffers,
+            cycleCompletedTransfers,
             transportCapacityUsed: {
               ...prev.transportCapacityUsed,
               [from]: used + transportUnits,
@@ -536,6 +575,11 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           relationAlerts
         );
 
+        let cycleTradeOffers = [...prev.cycleTradeOffers];
+        if (item === "food" || item === "energy" || item === "money" || item === "technology") {
+          cycleTradeOffers = recordTradeOffer(cycleTradeOffers, from, to, item, amount, prev.cycle);
+        }
+
         return {
           ...prev,
           transportRoutes,
@@ -545,6 +589,7 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
           regions: startRel.regions,
           relationEvents: startRel.relationEvents,
           relationAlerts: startRel.relationAlerts,
+          cycleTradeOffers,
         };
       });
     },
@@ -778,7 +823,9 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
   const setCarbonTax = useCallback((countryId: CountryId, newRate: number) => {
     setGameState((prev) => {
       const region = prev.regions[countryId];
-      const clamped = snapCarbonTaxRate(newRate);
+      const floor = getCarbonTaxFloor(prev, countryId);
+      const ceiling = getCarbonTaxCeiling(prev, countryId) ?? 100;
+      const clamped = snapCarbonTaxRate(newRate, floor, ceiling);
       if (clamped === region.carbonTax) return prev;
 
       return {
@@ -806,58 +853,128 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
     });
   }, []);
 
-  const recordSummitVote = useCallback((countryId: CountryId, votedYes: boolean) => {
-    const resolution = "Emission Limits";
+  const applyVoteFactionEffects = (
+    events: ReturnType<typeof createEmptyFactionCycleEvents>,
+    choice: SummitVoteChoice,
+    ceiling: boolean
+  ) => {
+    if (choice === "abstain") return events;
+    if (ceiling) {
+      if (choice === "yes") {
+        return { ...events, votedYesEmissionLimits: true, votedNoEmissionLimits: false };
+      }
+      return { ...events, votedNoEmissionLimits: true, votedYesEmissionLimits: false };
+    }
+    if (choice === "yes") {
+      return { ...events, votedYesEmissionLimits: true, votedNoEmissionLimits: false };
+    }
+    return { ...events, votedNoEmissionLimits: true, votedYesEmissionLimits: false };
+  };
+
+  const castSummitVote = useCallback((countryId: CountryId, choice: SummitVoteChoice) => {
     setGameState((prev) => {
-      const prevEvents = prev.factionCycleEvents[countryId] ?? createEmptyFactionCycleEvents();
-      const events = {
-        ...prevEvents,
-        votedYesEmissionLimits: votedYes || prevEvents.votedYesEmissionLimits,
-        votedNoEmissionLimits: !votedYes || prevEvents.votedNoEmissionLimits,
-      };
-      if (votedYes) {
-        events.votedNoEmissionLimits = false;
-      } else {
-        events.votedYesEmissionLimits = false;
+      const pending = prev.pendingSummitVote;
+      if (!pending) return prev;
+
+      const votes = { ...pending.votes, [countryId]: choice };
+      return { ...prev, pendingSummitVote: { ...pending, votes } };
+    });
+  }, []);
+
+  const autoVoteSummitBots = useCallback(() => {
+    setGameState((prev) => {
+      const pending = prev.pendingSummitVote;
+      if (!pending) return prev;
+
+      const votes = { ...pending.votes };
+      const allCountries = Object.keys(COUNTRY_CONFIGS) as CountryId[];
+      for (const id of allCountries) {
+        if (votes[id]) continue;
+        votes[id] = computeBotVote(id, pending, prev.regions);
+      }
+      return { ...prev, pendingSummitVote: { ...pending, votes } };
+    });
+  }, []);
+
+  const finalizeSummitVote = useCallback(() => {
+    setGameState((prev) => {
+      const pending = prev.pendingSummitVote;
+      if (!pending) return prev;
+
+      const allCountries = Object.keys(COUNTRY_CONFIGS) as CountryId[];
+      const votes: Partial<Record<CountryId, SummitVoteChoice>> = { ...pending.votes };
+      for (const id of allCountries) {
+        if (!votes[id]) votes[id] = "abstain";
       }
 
-      const voteChoice = votedYes ? ("yes" as const) : ("no" as const);
-      const summitVotes = [...prev.summitVotes];
-      const existingIndex = summitVotes.findIndex(
-        (v) => v.cycle === prev.cycle && v.resolution === resolution
-      );
-      let record;
-      if (existingIndex >= 0) {
-        record = {
-          ...summitVotes[existingIndex],
-          votes: { ...summitVotes[existingIndex].votes, [countryId]: voteChoice },
-        };
-        summitVotes[existingIndex] = record;
-      } else {
-        record = { cycle: prev.cycle, resolution, votes: { [countryId]: voteChoice } };
-        summitVotes.push(record);
-      }
-
-      const summitRel = applySummitVoteRelations(
+      const { passed } = tallySummitVote(votes);
+      const resolution = activateResolution(
+        { ...pending, votes },
+        passed,
         prev.regions,
-        countryId,
-        voteChoice,
-        record,
-        prev.cycle,
-        prev.relationEvents,
-        prev.relationAlerts
+        pending.cycle
+      );
+
+      let regions = prev.regions;
+      let relationEvents = [...prev.relationEvents];
+      let relationAlerts = [...prev.relationAlerts];
+      let factionCycleEvents = { ...prev.factionCycleEvents };
+
+      const voteRecord = {
+        cycle: pending.cycle,
+        resolution: pending.resolutionText,
+        boundaryType: pending.boundaryType,
+        passed,
+        votes,
+      };
+
+      const summitRel = applyAllSummitVoteRelations(
+        regions,
+        votes,
+        voteRecord,
+        pending.cycle,
+        relationEvents,
+        relationAlerts
+      );
+      regions = summitRel.regions;
+      relationEvents = summitRel.relationEvents;
+      relationAlerts = summitRel.relationAlerts;
+
+      for (const voter of allCountries) {
+        const choice = votes[voter]!;
+        const ceiling = isCeilingResolution(pending.boundaryType);
+        const prevEvents = factionCycleEvents[voter] ?? createEmptyFactionCycleEvents();
+        factionCycleEvents = {
+          ...factionCycleEvents,
+          [voter]: applyVoteFactionEffects(prevEvents, choice, ceiling),
+        };
+      }
+
+      let tradeRestrictionSuspensionUntil = prev.tradeRestrictionSuspensionUntil;
+      if (
+        passed &&
+        resolution.tradeRestrictionsSuspendedUntil &&
+        resolution.tradeRestrictionsSuspendedUntil > tradeRestrictionSuspensionUntil
+      ) {
+        tradeRestrictionSuspensionUntil = resolution.tradeRestrictionsSuspendedUntil;
+      }
+
+      const activeSummitResolutions = replaceSupersededResolutions(
+        prev.activeSummitResolutions,
+        resolution
       );
 
       return {
         ...prev,
-        summitVotes,
-        regions: summitRel.regions,
-        relationEvents: summitRel.relationEvents,
-        relationAlerts: summitRel.relationAlerts,
-        factionCycleEvents: {
-          ...prev.factionCycleEvents,
-          [countryId]: events,
-        },
+        pendingSummitVote: null,
+        regions,
+        relationEvents,
+        relationAlerts,
+        factionCycleEvents,
+        summitVotes: [...prev.summitVotes, voteRecord],
+        summitHistory: [...prev.summitHistory, resolution],
+        activeSummitResolutions,
+        tradeRestrictionSuspensionUntil,
       };
     });
   }, []);
@@ -911,7 +1028,9 @@ export function GameProvider({ hexes, children }: { hexes: HexData[]; children: 
         advanceCycle,
         setCarbonTax,
         setCarbonTaxRecycling,
-        recordSummitVote,
+        castSummitVote,
+        autoVoteSummitBots,
+        finalizeSummitVote,
         respondTransitRequest,
         cancelTransit,
         cancelTrade,

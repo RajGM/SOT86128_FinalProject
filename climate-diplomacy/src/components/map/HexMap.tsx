@@ -12,6 +12,7 @@ import { tileKey } from "../../types/game";
 import { ResourcesBar } from "../ui/ResourcesBar";
 import { ActionPanel } from "../ui/ActionPanel";
 import { DashboardModal } from "../ui/DashboardModal";
+import { SummitVoteModal } from "../ui/SummitVoteModal";
 import { ComparisonDashboard } from "../ui/ComparisonDashboard";
 import { BuildPanel } from "../ui/BuildPanel";
 import { RelationAlerts } from "../ui/RelationAlerts";
@@ -174,6 +175,7 @@ export function HexMap({ hexes }: HexMapProps) {
       <ActionPanel />
       <RelationAlerts />
       <DashboardModal />
+      <SummitVoteModal />
       <ComparisonDashboard />
       <BuildPanel />
 

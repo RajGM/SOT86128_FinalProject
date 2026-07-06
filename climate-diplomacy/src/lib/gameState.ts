@@ -49,7 +49,16 @@ import {
   applyTransitFeeRelation,
   getTransitCommissionMultiplier,
   processCycleRelations,
+  applySummitNonComplianceRelations,
 } from "./relationMechanics";
+import {
+  checkBoundariesInOrder,
+  createPendingVote,
+  checkResolutionCompliance,
+  getResolutionTargets,
+  getYesVoters,
+  shouldExpireResolution,
+} from "./summitMechanics";
 
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
@@ -138,6 +147,19 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
       ALL_COUNTRIES.map((id) => [id, regions[id].co2])
     ) as Partial<Record<CountryId, number>>,
     summitVotes: [],
+    activeSummitResolutions: [],
+    summitHistory: [],
+    pendingSummitVote: null,
+    summitComplianceResults: [],
+    summitComplianceAlerts: [],
+    peakGlobalPopulation: ALL_COUNTRIES.reduce(
+      (s, id) => s + regions[id].population,
+      0
+    ),
+    cycleTradeOffers: [],
+    cycleCompletedTransfers: [],
+    tradeRestrictionSuspensionUntil: 0,
+    summitNonComplianceStrikes: {},
     climateFinanceGiven: {},
     gapScoreHistory: {},
     lastFactionTempThreshold: 0,
@@ -717,6 +739,124 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     ALL_COUNTRIES.reduce((sum, id) => sum + regions[id].happiness, 0) / ALL_COUNTRIES.length
   );
 
+  const currentGlobalPopulation = ALL_COUNTRIES.reduce(
+    (sum, id) => sum + regions[id].population,
+    0
+  );
+  const peakGlobalPopulation = Math.max(
+    prev.peakGlobalPopulation,
+    currentGlobalPopulation
+  );
+
+  // 12c. Summit compliance check + boundary detection
+  let activeSummitResolutions = [...prev.activeSummitResolutions];
+  let summitComplianceResults = [...prev.summitComplianceResults];
+  let summitComplianceAlerts: string[] = [];
+  let summitNonComplianceStrikes = { ...prev.summitNonComplianceStrikes };
+  let factionCycleEventsFinal = { ...factionCycleEvents };
+  let tradeRestrictionSuspensionUntil = prev.tradeRestrictionSuspensionUntil;
+
+  for (const resolution of activeSummitResolutions) {
+    if (
+      resolution.tradeRestrictionsSuspendedUntil &&
+      resolution.tradeRestrictionsSuspendedUntil > tradeRestrictionSuspensionUntil
+    ) {
+      tradeRestrictionSuspensionUntil = resolution.tradeRestrictionsSuspendedUntil;
+    }
+  }
+
+  for (const resolution of activeSummitResolutions) {
+    if (!resolution.active || !resolution.passed) continue;
+    const targets = getResolutionTargets(resolution, regions);
+    for (const countryId of targets) {
+      const result = checkResolutionCompliance(
+        resolution,
+        countryId,
+        regions,
+        prev.cycle,
+        prev.cycleTradeOffers,
+        prev.cycleCompletedTransfers
+      );
+      summitComplianceResults.push(result);
+      if (!result.compliant) {
+        const countryName = COUNTRY_CONFIGS[countryId].name;
+        summitComplianceAlerts.push(
+          `⚠️ ${countryName} is non-compliant with "${resolution.resolutionText}". Relations deteriorating.`
+        );
+        summitNonComplianceStrikes = {
+          ...summitNonComplianceStrikes,
+          [countryId]: (summitNonComplianceStrikes[countryId] ?? 0) + 1,
+        };
+        const yesVoters = getYesVoters(resolution);
+        const ncRel = applySummitNonComplianceRelations(
+          regions,
+          countryId,
+          yesVoters,
+          resolution.resolutionText,
+          prev.cycle,
+          relationEvents,
+          relationAlerts
+        );
+        regions = ncRel.regions;
+        relationEvents = ncRel.relationEvents;
+        relationAlerts = ncRel.relationAlerts;
+
+        const prevEvents =
+          factionCycleEventsFinal[countryId] ?? createEmptyFactionCycleEvents();
+        factionCycleEventsFinal = {
+          ...factionCycleEventsFinal,
+          [countryId]: { ...prevEvents, summitNonCompliance: true },
+        };
+        const region = regions[countryId];
+        regions = {
+          ...regions,
+          [countryId]: {
+            ...region,
+            factions: applyFactionSatisfactionChanges(region.factions, {
+              ...prevEvents,
+              summitNonCompliance: true,
+            }),
+          },
+        };
+      }
+    }
+  }
+
+  activeSummitResolutions = activeSummitResolutions.map((r) => {
+    if (
+      shouldExpireResolution(
+        r,
+        regions,
+        prev.cycle,
+        worldHappiness,
+        peakGlobalPopulation,
+        currentGlobalPopulation,
+        climateFinanceGiven
+      )
+    ) {
+      return { ...r, active: false };
+    }
+    return r;
+  });
+
+  let pendingSummitVote = prev.pendingSummitVote;
+  if (!pendingSummitVote && !prev.pendingSummitVote) {
+    const breach = checkBoundariesInOrder({
+      regions,
+      globalTemperature,
+      globalCo2ThisCycle: cycleCo2,
+      worldHappiness,
+      cycle: prev.cycle,
+      climateFinanceGiven,
+      peakGlobalPopulation,
+      currentGlobalPopulation,
+      cycleCo2ByCountry,
+    });
+    if (breach) {
+      pendingSummitVote = createPendingVote(breach, prev.cycle);
+    }
+  }
+
   const nextCycle = prev.cycle + 1;
   const snapshotState: GameState = {
     ...prev,
@@ -732,6 +872,15 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
     climateFinanceThisCycle: {},
     relationEvents,
     relationAlerts,
+    activeSummitResolutions,
+    pendingSummitVote,
+    summitComplianceResults,
+    summitComplianceAlerts,
+    peakGlobalPopulation,
+    cycleTradeOffers: [],
+    cycleCompletedTransfers: [],
+    tradeRestrictionSuspensionUntil,
+    summitNonComplianceStrikes,
     cycle: nextCycle,
   };
   const comparisonRows = computeAllCountryComparisons(snapshotState);
@@ -750,6 +899,6 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
       ALL_COUNTRIES.map((id) => [id, regions[id].co2])
     ) as Partial<Record<CountryId, number>>,
     lastFactionTempThreshold,
-    factionCycleEvents: {},
+    factionCycleEvents: factionCycleEventsFinal,
   };
 }

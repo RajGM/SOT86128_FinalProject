@@ -46,6 +46,7 @@ export const RELATION_EVENT_DELTAS: Record<RelationEventType, number> = {
   transit_cancelled: -6,
   summit_same_vote: 2,
   summit_opposite_vote: -3,
+  summit_non_compliance: -4,
   top_emitter_damage: -1,
   co2_decreased: 1,
   climate_finance_given: 5,
@@ -283,8 +284,10 @@ export function isTradePartner(
 export function canInitiateTrade(
   regions: Record<CountryId, RegionState>,
   from: CountryId,
-  to: CountryId
+  to: CountryId,
+  tradeRestrictionSuspended = false
 ): boolean {
+  if (tradeRestrictionSuspended) return true;
   return getRelation(regions, to, from) >= RELATION_TRADE_THRESHOLD;
 }
 
@@ -459,6 +462,81 @@ export function applySummitVoteRelations(
       cycle,
       descA,
       descB,
+      result.relationEvents,
+      result.relationAlerts
+    );
+  }
+  return result;
+}
+
+/** Apply summit vote relation effects once per country pair (batch finalize). */
+export function applyAllSummitVoteRelations(
+  regions: Record<CountryId, RegionState>,
+  votes: Partial<Record<CountryId, SummitVoteChoice>>,
+  record: SummitVoteRecord,
+  cycle: number,
+  relationEvents: RelationEvent[],
+  relationAlerts: RelationAlert[]
+): RelationUpdateResult {
+  let result: RelationUpdateResult = { regions, relationEvents, relationAlerts };
+  const resolution = record.resolution;
+
+  for (let i = 0; i < ALL_COUNTRIES.length; i++) {
+    for (let j = i + 1; j < ALL_COUNTRIES.length; j++) {
+      const a = ALL_COUNTRIES[i];
+      const b = ALL_COUNTRIES[j];
+      const voteA = votes[a];
+      const voteB = votes[b];
+      if (!voteA || !voteB || voteA === "abstain" || voteB === "abstain") continue;
+
+      const same = voteA === voteB;
+      const delta = same
+        ? RELATION_EVENT_DELTAS.summit_same_vote
+        : RELATION_EVENT_DELTAS.summit_opposite_vote;
+      const event = same ? "summit_same_vote" : "summit_opposite_vote";
+      const desc = same
+        ? `Voted same way on ${resolution}`
+        : `Voted opposite on ${resolution}`;
+
+      result = applyBilateralRelation(
+        result.regions,
+        a,
+        b,
+        delta,
+        event,
+        cycle,
+        desc,
+        desc,
+        result.relationEvents,
+        result.relationAlerts
+      );
+    }
+  }
+  return result;
+}
+
+export function applySummitNonComplianceRelations(
+  regions: Record<CountryId, RegionState>,
+  violator: CountryId,
+  yesVoters: CountryId[],
+  resolutionText: string,
+  cycle: number,
+  relationEvents: RelationEvent[],
+  relationAlerts: RelationAlert[]
+): RelationUpdateResult {
+  let result: RelationUpdateResult = { regions, relationEvents, relationAlerts };
+  const violatorName = COUNTRY_CONFIGS[violator].name;
+
+  for (const voter of yesVoters) {
+    if (voter === violator) continue;
+    result = applyOneSidedRelation(
+      result.regions,
+      voter,
+      violator,
+      RELATION_EVENT_DELTAS.summit_non_compliance,
+      "summit_non_compliance",
+      cycle,
+      `${violatorName} non-compliant with "${resolutionText}"`,
       result.relationEvents,
       result.relationAlerts
     );
