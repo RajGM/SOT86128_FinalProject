@@ -5,6 +5,7 @@ export function ActionPanel() {
   const {
     gameState,
     isTestScenario,
+    multiplayer,
     dashboardOpen,
     setDashboardOpen,
     buildPanelOpen,
@@ -12,6 +13,9 @@ export function ActionPanel() {
     selectedHex,
     advanceCycle,
   } = useGame();
+
+  const showAdvance =
+    gameState.testingMode || (multiplayer?.isHost && !gameState.testingMode);
 
   return (
     <div className="action-panel">
@@ -34,7 +38,7 @@ export function ActionPanel() {
           Build
         </button>
       )}
-      {gameState.testingMode && (
+      {showAdvance && (
         <button
           className="overlay-btn"
           onClick={advanceCycle}

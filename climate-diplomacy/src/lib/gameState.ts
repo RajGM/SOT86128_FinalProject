@@ -40,9 +40,11 @@ import {
 } from "./factionMechanics";
 import {
   appendGapHistory,
+  appendHappinessHistory,
   computeAllCountryComparisons,
   isClimateFinanceTransfer,
   climateFinanceAmount,
+  updatePeakGreenTracking,
 } from "./comparisonMetrics";
 import { processCarbonTaxCollection } from "./carbonTaxMechanics";
 import {
@@ -162,6 +164,9 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
     summitNonComplianceStrikes: {},
     climateFinanceGiven: {},
     gapScoreHistory: {},
+    happinessHistory: {},
+    peakGreenRatio: {},
+    peakGreenRatioCycle: {},
     lastFactionTempThreshold: 0,
     factionCycleEvents: {},
     relationEvents: [],
@@ -171,9 +176,16 @@ export function createInitialGameState(_hexes: HexData[] = []): GameState {
   };
 
   const initialRows = computeAllCountryComparisons(base);
-  return {
+  const withGap = {
     ...base,
     gapScoreHistory: appendGapHistory({}, 1, initialRows),
+    happinessHistory: appendHappinessHistory({}, 1, base),
+  };
+  const peakTracking = updatePeakGreenTracking({}, {}, 1, withGap);
+  return {
+    ...withGap,
+    peakGreenRatio: peakTracking.peakGreenRatio,
+    peakGreenRatioCycle: peakTracking.peakGreenRatioCycle,
   };
 }
 
@@ -885,10 +897,20 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   };
   const comparisonRows = computeAllCountryComparisons(snapshotState);
   const gapScoreHistory = appendGapHistory(prev.gapScoreHistory, nextCycle, comparisonRows);
+  const happinessHistory = appendHappinessHistory(prev.happinessHistory, nextCycle, snapshotState);
+  const peakTracking = updatePeakGreenTracking(
+    prev.peakGreenRatio,
+    prev.peakGreenRatioCycle,
+    nextCycle,
+    snapshotState
+  );
 
   return {
     ...snapshotState,
     gapScoreHistory,
+    happinessHistory,
+    peakGreenRatio: peakTracking.peakGreenRatio,
+    peakGreenRatioCycle: peakTracking.peakGreenRatioCycle,
     cycleStartCo2: Object.fromEntries(
       ALL_COUNTRIES.map((id) => [id, regions[id].co2])
     ) as Partial<Record<CountryId, number>>,

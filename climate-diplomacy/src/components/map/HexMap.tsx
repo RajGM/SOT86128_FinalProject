@@ -18,18 +18,22 @@ import { BuildPanel } from "../ui/BuildPanel";
 import { RelationAlerts } from "../ui/RelationAlerts";
 import { RouteLines } from "./RouteLines";
 import { hexToTileTags } from "../../types/game";
+import { AudioController } from "../audio/AudioController";
+import { AudioSettingsPanel } from "../ui/AudioSettingsPanel";
 
 interface HexMapProps {
   hexes: HexData[];
+  multiplayerMode?: boolean;
 }
 
-export function HexMap({ hexes }: HexMapProps) {
+export function HexMap({ hexes, multiplayerMode = false }: HexMapProps) {
   const {
     gameState,
     selectedHex,
     setSelectedHex,
     comparisonOpen,
     setComparisonOpen,
+    multiplayer,
   } = useGame();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -173,6 +177,8 @@ export function HexMap({ hexes }: HexMapProps) {
       <MapLegend countryCounts={countryCounts} />
 
       <ActionPanel />
+      {!multiplayerMode && <AudioSettingsPanel />}
+      <AudioController />
       <RelationAlerts />
       <DashboardModal />
       <SummitVoteModal />
@@ -240,25 +246,48 @@ export function HexMap({ hexes }: HexMapProps) {
         </div>
       )}
 
-      <div
-        style={{
-          position: "absolute",
-          top: 56,
-          left: "50%",
-          transform: "translateX(-50%)",
-          background: "rgba(0,0,0,0.7)",
-          color: "#fff",
-          borderRadius: 8,
-          padding: "6px 16px",
-          fontSize: 14,
-          fontWeight: 700,
-          letterSpacing: 1,
-          backdropFilter: "blur(8px)",
-          zIndex: 5,
-        }}
-      >
-        Climate Diplomacy — Testing Mode
-      </div>
+      {!multiplayerMode && (
+        <div
+          style={{
+            position: "absolute",
+            top: 56,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(0,0,0,0.7)",
+            color: "#fff",
+            borderRadius: 8,
+            padding: "6px 16px",
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: 1,
+            backdropFilter: "blur(8px)",
+            zIndex: 5,
+          }}
+        >
+          Climate Diplomacy — Testing Mode
+        </div>
+      )}
+
+      {multiplayerMode && multiplayer && (
+        <div
+          style={{
+            position: "absolute",
+            top: 56,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(0,0,0,0.7)",
+            color: "#fff",
+            borderRadius: 8,
+            padding: "6px 16px",
+            fontSize: 13,
+            fontWeight: 600,
+            backdropFilter: "blur(8px)",
+            zIndex: 5,
+          }}
+        >
+          Multiplayer — {multiplayer.assignedCountry.toUpperCase()}
+        </div>
+      )}
 
       <div
         style={{

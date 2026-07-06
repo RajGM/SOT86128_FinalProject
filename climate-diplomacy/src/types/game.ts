@@ -401,6 +401,11 @@ export interface GapHistoryPoint {
   gap: number;
 }
 
+export interface HappinessHistoryPoint {
+  cycle: number;
+  happiness: number;
+}
+
 export interface GameState {
   regions: Record<CountryId, RegionState>;
   tileBuildings: Record<string, PlacedBuilding>;
@@ -450,6 +455,12 @@ export interface GameState {
   climateFinanceGiven: Partial<Record<CountryId, number>>;
   /** Composite gap score per cycle for historical trend chart. */
   gapScoreHistory: Partial<Record<CountryId, GapHistoryPoint[]>>;
+  /** Per-cycle happiness for People's Champion award. */
+  happinessHistory: Partial<Record<CountryId, HappinessHistoryPoint[]>>;
+  /** Best green-energy ratio reached so far (for tie-breaking). */
+  peakGreenRatio: Partial<Record<CountryId, number>>;
+  /** Cycle when peak green ratio was first reached (tie-breaker). */
+  peakGreenRatioCycle: Partial<Record<CountryId, number>>;
   /** Highest global temperature threshold already crossed (faction green concern). */
   lastFactionTempThreshold: number;
   /** Accumulated faction events this cycle (reset after cycle processing). */

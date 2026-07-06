@@ -1,0 +1,33 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        ".read": true,
+        ".write": true,
+        "players": {
+          "$playerId": {
+            ".write": true
+          }
+        }
+      }
+    },
+    "games": {
+      "$roomId": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "activeRooms": {
+      ".read": true,
+      "$roomId": {
+        ".write": true
+      }
+    },
+    "archive": {
+      "$roomId": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}

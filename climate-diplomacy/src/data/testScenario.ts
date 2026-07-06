@@ -17,7 +17,7 @@ import type {
 } from "../types/game";
 import { tileKey } from "../types/game";
 import { createInitialFactionState } from "../lib/factionMechanics";
-import { appendGapHistory, computeAllCountryComparisons } from "../lib/comparisonMetrics";
+import { appendGapHistory, appendHappinessHistory, computeAllCountryComparisons, updatePeakGreenTracking } from "../lib/comparisonMetrics";
 import { ROUTE_CO2_PER_UNIT } from "../lib/transportHub";
 import { createHexLookup } from "../lib/hexUtils";
 
@@ -677,6 +677,9 @@ export function createTestScenarioState(hexes: HexData[]): GameState {
     },
     climateFinanceGiven: { latam: 18 },
     gapScoreHistory: {},
+    happinessHistory: {},
+    peakGreenRatio: {},
+    peakGreenRatioCycle: {},
     lastFactionTempThreshold: 1.5,
     factionCycleEvents: {},
     relationEvents: [],
@@ -686,8 +689,15 @@ export function createTestScenarioState(hexes: HexData[]): GameState {
   };
 
   const comparisonRows = computeAllCountryComparisons(base);
-  return {
+  const withGap = {
     ...base,
     gapScoreHistory: appendGapHistory({}, TEST_SCENARIO_CYCLE, comparisonRows),
+    happinessHistory: appendHappinessHistory({}, TEST_SCENARIO_CYCLE, base),
+  };
+  const peakTracking = updatePeakGreenTracking({}, {}, TEST_SCENARIO_CYCLE, withGap);
+  return {
+    ...withGap,
+    peakGreenRatio: peakTracking.peakGreenRatio,
+    peakGreenRatioCycle: peakTracking.peakGreenRatioCycle,
   };
 }

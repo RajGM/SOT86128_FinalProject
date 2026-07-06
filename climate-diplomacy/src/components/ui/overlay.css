@@ -51,6 +51,22 @@
   white-space: nowrap;
 }
 
+.test-endgame-bar {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+}
+
 .overlay-btn.danger {
   background: rgba(239, 68, 68, 0.25);
   border-color: rgba(239, 68, 68, 0.55);
@@ -773,5 +789,64 @@
   padding: 10px 14px;
   font-size: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.audio-settings {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 12;
+}
+
+.audio-settings-toggle {
+  padding: 8px 12px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.audio-settings-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 240px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.audio-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.audio-mute-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+
+.audio-slider-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 36px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.audio-slider {
+  width: 100%;
+  accent-color: #3b82f6;
+}
+
+.audio-slider-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
 }
 

@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:victory": "npx tsx scripts/verify-victory.ts"
   },
   "devDependencies": {
+    "@types/node": "^26.1.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
   },
@@ -16,8 +18,10 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "firebase": "^12.15.0",
     "honeycomb-grid": "^4.1.5",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.1"
   }
 }

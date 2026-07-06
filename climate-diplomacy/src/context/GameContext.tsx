@@ -1,4 +1,13 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import type { CountryId, HexData } from "../types/hex";
 import { COUNTRY_CONFIGS } from "../types/hex";
 import type {
@@ -79,10 +88,23 @@ import {
   replaceSupersededResolutions,
   tallySummitVote,
 } from "../lib/summitMechanics";
+import { playSound } from "../audio/AudioManager";
+
+export interface MultiplayerConfig {
+  roomId: string;
+  playerId: string;
+  isHost: boolean;
+  assignedCountry: CountryId;
+  playerName: string;
+  syncedState?: GameState | null;
+  syncedVersion?: number;
+  onStateSync?: (state: GameState) => void;
+}
 
 interface GameContextValue {
   hexes: HexData[];
   isTestScenario: boolean;
+  multiplayer: MultiplayerConfig | null;
   gameState: GameState;
   selectedHex: HexData | null;
   setSelectedHex: (hex: HexData | null) => void;
@@ -139,23 +161,58 @@ export function GameProvider({
   children,
   initialState,
   isTestScenario = false,
+  multiplayer = null,
 }: {
   hexes: HexData[];
   children: ReactNode;
   initialState?: GameState;
   isTestScenario?: boolean;
+  multiplayer?: MultiplayerConfig | null;
 }) {
-  const [gameState, setGameState] = useState<GameState>(
+  const [gameState, setGameStateInternal] = useState<GameState>(
     () => initialState ?? createInitialGameState(hexes)
   );
+  const lastSyncedVersion = useRef(0);
+  const skipNextSync = useRef(false);
+
+  useEffect(() => {
+    if (!multiplayer?.syncedState || multiplayer.syncedVersion === undefined) return;
+    if (multiplayer.isHost) return;
+    if (multiplayer.syncedVersion <= lastSyncedVersion.current) return;
+    lastSyncedVersion.current = multiplayer.syncedVersion;
+    skipNextSync.current = true;
+    setGameStateInternal(multiplayer.syncedState);
+  }, [multiplayer?.syncedState, multiplayer?.syncedVersion]);
+
   const hexLookup = useMemo(() => createHexLookup(hexes), [hexes]);
   const [selectedHex, setSelectedHex] = useState<HexData | null>(null);
-  const [viewCountry, setViewCountry] = useState<CountryId>("usa");
+  const [viewCountry, setViewCountry] = useState<CountryId>(
+    () => multiplayer?.assignedCountry ?? "usa"
+  );
   const [resourcesExpanded, setResourcesExpanded] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [dashboardTab, setDashboardTab] = useState<"technology" | "diplomacy" | "trade" | "routes" | "summit">("technology");
   const [comparisonOpen, setComparisonOpen] = useState(false);
   const [buildPanelOpen, setBuildPanelOpen] = useState(false);
+
+  const setGameState = useCallback(
+    (updater: GameState | ((prev: GameState) => GameState)) => {
+      setGameStateInternal((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        if (multiplayer?.onStateSync && !skipNextSync.current) {
+          multiplayer.onStateSync(next);
+        }
+        skipNextSync.current = false;
+        return next;
+      });
+    },
+    [multiplayer]
+  );
+
+  useEffect(() => {
+    if (!multiplayer?.assignedCountry) return;
+    setViewCountry(multiplayer.assignedCountry);
+  }, [multiplayer?.assignedCountry]);
 
   const toggleResourcesExpanded = useCallback(() => {
     setResourcesExpanded((v) => !v);
@@ -174,6 +231,7 @@ export function GameProvider({
       const key = tileKey(selectedHex.q, selectedHex.r);
       const regionId = resolveRegionId(selectedHex);
 
+      let placed = false;
       setGameState((prev) => {
         const region = prev.regions[regionId];
         const baseCost = getBuildCost(build, tier);
@@ -194,17 +252,18 @@ export function GameProvider({
         if (!placement.available) return prev;
         if (isConstructionBlocked(region.happiness)) return prev;
 
-        const placed = createPlacedBuilding(type, tier, selectedHex);
+        const newBuilding = createPlacedBuilding(type, tier, selectedHex);
         if (prev.testingMode && !selectedHex.countryId) {
-          placed.countryId = regionId;
+          newBuilding.countryId = regionId;
         }
 
         const prevEvents = prev.factionCycleEvents[regionId] ?? createEmptyFactionCycleEvents();
         const buildEvents = recordBuildFactionEvent(prevEvents, type);
 
+        placed = true;
         return {
           ...prev,
-          tileBuildings: { ...prev.tileBuildings, [key]: placed },
+          tileBuildings: { ...prev.tileBuildings, [key]: newBuilding },
           factionCycleEvents: {
             ...prev.factionCycleEvents,
             [regionId]: buildEvents,
@@ -220,6 +279,7 @@ export function GameProvider({
           },
         };
       });
+      if (placed) playSound("build-place");
     },
     [selectedHex, resolveRegionId, hexLookup]
   );
@@ -229,6 +289,7 @@ export function GameProvider({
     const key = tileKey(selectedHex.q, selectedHex.r);
     const regionId = resolveRegionId(selectedHex);
 
+    let demolished = false;
     setGameState((prev) => {
       const existing = prev.tileBuildings[key];
       if (!existing) return prev;
@@ -240,13 +301,13 @@ export function GameProvider({
 
       const { [key]: _removed, ...remainingBuildings } = prev.tileBuildings;
 
-      // Disrupt routes using this facility
       const disruptedRouteIds = new Set(
         prev.transportRoutes
           .filter((r) => r.fromHubId === existing.id)
           .map((r) => r.id)
       );
 
+      demolished = true;
       return {
         ...prev,
         tileBuildings: remainingBuildings,
@@ -265,6 +326,7 @@ export function GameProvider({
         },
       };
     });
+    if (demolished) playSound("build-demolish");
   }, [selectedHex, resolveRegionId]);
 
   const upgradeBuild = useCallback(() => {
@@ -272,6 +334,7 @@ export function GameProvider({
     const key = tileKey(selectedHex.q, selectedHex.r);
     const regionId = resolveRegionId(selectedHex);
 
+    let upgraded = false;
     setGameState((prev) => {
       const existing = prev.tileBuildings[key];
       if (!existing || !canUpgradeTier(existing.tier)) return prev;
@@ -296,6 +359,7 @@ export function GameProvider({
         if (!hubCheck.available) return prev;
       }
 
+      upgraded = true;
       return {
         ...prev,
         tileBuildings: {
@@ -313,7 +377,8 @@ export function GameProvider({
         },
       };
     });
-  }, [selectedHex, resolveRegionId]);
+    if (upgraded) playSound("build-upgrade");
+  }, [selectedHex, resolveRegionId, hexLookup]);
 
   const postTier3Upgrade = useCallback(() => {
     if (!selectedHex) return;
@@ -385,6 +450,9 @@ export function GameProvider({
         hubUpgradePayer?: CountryId;
       }
     ) => {
+      let tradeSound: "trade-propose" | "trade-accept" | "trade-reject" | null = null;
+      let playCoin = false;
+
       setGameState((prev) => {
         if (amount <= 0) return prev;
 
@@ -418,6 +486,7 @@ export function GameProvider({
             relationEvents,
             relationAlerts
           );
+          tradeSound = "trade-reject";
           return {
             ...prev,
             tradePartners,
@@ -549,6 +618,9 @@ export function GameProvider({
             );
           }
 
+          tradeSound = "trade-accept";
+          if (item === "money") playCoin = true;
+
           return {
             ...prev,
             tileBuildings,
@@ -593,6 +665,8 @@ export function GameProvider({
           cycleTradeOffers = recordTradeOffer(cycleTradeOffers, from, to, item, amount, prev.cycle);
         }
 
+        tradeSound = "trade-propose";
+
         return {
           ...prev,
           transportRoutes,
@@ -605,6 +679,9 @@ export function GameProvider({
           cycleTradeOffers,
         };
       });
+
+      if (tradeSound) playSound(tradeSound);
+      if (playCoin) playSound("coin");
     },
     [hexes]
   );
@@ -796,6 +873,7 @@ export function GameProvider({
   }, []);
 
   const cancelTrade = useCallback((tradeId: string) => {
+    let cancelled = false;
     setGameState((prev) => {
       const trade = prev.tradeAgreements.find((t) => t.id === tradeId);
       if (!trade || !trade.active) return prev;
@@ -813,6 +891,7 @@ export function GameProvider({
         prev.relationAlerts
       );
 
+      cancelled = true;
       return {
         ...prev,
         tradeAgreements: prev.tradeAgreements.map((t) =>
@@ -823,6 +902,7 @@ export function GameProvider({
         relationAlerts: cancelResult.relationAlerts,
       };
     });
+    if (cancelled) playSound("trade-reject");
   }, []);
 
   const dismissRelationAlerts = useCallback(() => {
@@ -834,6 +914,7 @@ export function GameProvider({
   }, [hexes]);
 
   const setCarbonTax = useCallback((countryId: CountryId, newRate: number) => {
+    let changed = false;
     setGameState((prev) => {
       const region = prev.regions[countryId];
       const floor = getCarbonTaxFloor(prev, countryId);
@@ -841,6 +922,7 @@ export function GameProvider({
       const clamped = snapCarbonTaxRate(newRate, floor, ceiling);
       if (clamped === region.carbonTax) return prev;
 
+      changed = true;
       return {
         ...prev,
         regions: {
@@ -849,13 +931,16 @@ export function GameProvider({
         },
       };
     });
+    if (changed) playSound("slider-tick");
   }, []);
 
   const setCarbonTaxRecycling = useCallback((countryId: CountryId, recycling: CarbonTaxRecycling) => {
+    let changed = false;
     setGameState((prev) => {
       const region = prev.regions[countryId];
       if (region.carbonTaxRecycling === recycling) return prev;
 
+      changed = true;
       return {
         ...prev,
         regions: {
@@ -864,6 +949,7 @@ export function GameProvider({
         },
       };
     });
+    if (changed) playSound("toggle");
   }, []);
 
   const applyVoteFactionEffects = (
@@ -885,13 +971,16 @@ export function GameProvider({
   };
 
   const castSummitVote = useCallback((countryId: CountryId, choice: SummitVoteChoice) => {
+    let voted = false;
     setGameState((prev) => {
       const pending = prev.pendingSummitVote;
       if (!pending) return prev;
 
       const votes = { ...pending.votes, [countryId]: choice };
+      voted = true;
       return { ...prev, pendingSummitVote: { ...pending, votes } };
     });
+    if (voted) playSound("vote-cast");
   }, []);
 
   const autoVoteSummitBots = useCallback(() => {
@@ -910,6 +999,8 @@ export function GameProvider({
   }, []);
 
   const finalizeSummitVote = useCallback(() => {
+    let resolutionSound: "resolution-pass" | "resolution-fail" | null = null;
+
     setGameState((prev) => {
       const pending = prev.pendingSummitVote;
       if (!pending) return prev;
@@ -921,6 +1012,7 @@ export function GameProvider({
       }
 
       const { passed } = tallySummitVote(votes);
+      resolutionSound = passed ? "resolution-pass" : "resolution-fail";
       const resolution = activateResolution(
         { ...pending, votes },
         passed,
@@ -990,6 +1082,7 @@ export function GameProvider({
         tradeRestrictionSuspensionUntil,
       };
     });
+    if (resolutionSound) playSound(resolutionSound);
   }, []);
 
   const highlightFacilityRoutes = useCallback((countryId: CountryId) => {
@@ -1017,6 +1110,7 @@ export function GameProvider({
       value={{
         hexes,
         isTestScenario,
+        multiplayer,
         gameState,
         selectedHex,
         setSelectedHex: handleSetSelectedHex,

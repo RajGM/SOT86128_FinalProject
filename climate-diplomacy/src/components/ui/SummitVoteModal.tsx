@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useGame } from "../../context/GameContext";
+import { playSound } from "../../audio/AudioManager";
 import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
 import type { SummitVoteChoice } from "../../types/game";
 
@@ -29,6 +30,15 @@ export function SummitVoteModal() {
   } = useGame();
   const pending = gameState.pendingSummitVote;
   const [secondsLeft, setSecondsLeft] = useState(30);
+  const prevSecondsRef = useRef(secondsLeft);
+
+  useEffect(() => {
+    if (!pending) return;
+    if (secondsLeft <= 10 && secondsLeft < prevSecondsRef.current) {
+      playSound("cycle-tick");
+    }
+    prevSecondsRef.current = secondsLeft;
+  }, [secondsLeft, pending]);
 
   useEffect(() => {
     if (!pending) return;

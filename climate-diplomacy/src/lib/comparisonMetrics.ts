@@ -234,6 +234,54 @@ export function appendGapHistory(
   return next;
 }
 
+export function appendHappinessHistory(
+  history: Partial<Record<CountryId, { cycle: number; happiness: number }[]>>,
+  cycle: number,
+  state: GameState
+): Partial<Record<CountryId, { cycle: number; happiness: number }[]>> {
+  const next = { ...history };
+  for (const id of ALL_COUNTRIES) {
+    const existing = next[id] ?? [];
+    const point = { cycle, happiness: Math.round(state.regions[id].happiness) };
+    const last = existing[existing.length - 1];
+    if (last?.cycle === cycle) {
+      next[id] = [...existing.slice(0, -1), point];
+    } else {
+      next[id] = [...existing, point];
+    }
+  }
+  return next;
+}
+
+export function updatePeakGreenTracking(
+  peakRatios: Partial<Record<CountryId, number>>,
+  peakCycles: Partial<Record<CountryId, number>>,
+  cycle: number,
+  state: GameState
+): {
+  peakGreenRatio: Partial<Record<CountryId, number>>;
+  peakGreenRatioCycle: Partial<Record<CountryId, number>>;
+} {
+  const buildings = Object.values(state.tileBuildings);
+  const nextRatios = { ...peakRatios };
+  const nextCycles = { ...peakCycles };
+  for (const id of ALL_COUNTRIES) {
+    const { green, total } = countEnergyBuildings(buildings, id);
+    const ratio = green / Math.max(total, 1);
+    const prevPeak = nextRatios[id] ?? -1;
+    if (ratio > prevPeak) {
+      nextRatios[id] = ratio;
+      nextCycles[id] = cycle;
+    }
+  }
+  return { peakGreenRatio: nextRatios, peakGreenRatioCycle: nextCycles };
+}
+
+/** Display score 0–100 from composite gap (victoryConditions.md). */
+export function displayScoreFromGap(compositeGap: number): number {
+  return Math.round((1 - compositeGap) * 100);
+}
+
 /** Gap-based cell color: green (pioneer) → yellow → red (laggard). */
 export function gapCellColor(gap: number): string {
   const g = Math.max(0, Math.min(1, gap));

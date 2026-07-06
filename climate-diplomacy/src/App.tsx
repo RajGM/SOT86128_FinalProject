@@ -1,22 +1,20 @@
-import { useMemo } from "react";
-import { HexMap } from "./components/map/HexMap";
-import { GameProvider } from "./context/GameContext";
-import { createTestScenarioState, isTestScenarioPath } from "./data/testScenario";
-import { generateMap } from "./lib/mapGenerator";
-import "./components/ui/overlay.css";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { LandingPage } from "./pages/LandingPage";
+import { LobbyPage } from "./pages/LobbyPage";
+import { GamePage } from "./pages/GamePage";
+import { TestPage } from "./pages/TestPage";
 
 function App() {
-  const hexes = useMemo(() => generateMap(42), []);
-  const isTestScenario = useMemo(() => isTestScenarioPath(), []);
-  const initialState = useMemo(
-    () => (isTestScenario ? createTestScenarioState(hexes) : undefined),
-    [hexes, isTestScenario]
-  );
-
   return (
-    <GameProvider hexes={hexes} initialState={initialState} isTestScenario={isTestScenario}>
-      <HexMap hexes={hexes} />
-    </GameProvider>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/lobby/:roomId" element={<LobbyPage />} />
+        <Route path="/game/:roomId" element={<GamePage />} />
+        <Route path="/test" element={<TestPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
