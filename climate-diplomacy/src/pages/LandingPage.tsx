@@ -7,8 +7,7 @@ import { createRoom, joinRoom, joinErrorMessage, subscribeActiveRooms } from "..
 import { HostSettingsModal } from "../components/lobby/HostSettingsModal";
 import { JoinModal } from "../components/lobby/JoinModal";
 import { MusicToggle, SettingsGear } from "../components/settings/SettingsGear";
-import { AudioManager } from "../audio/AudioManager";
-import { isMusicEnabled } from "../lib/playerIdentity";
+import { useLobbyMusic } from "../hooks/useLobbyMusic";
 import "../components/ui/overlay.css";
 import "../styles/lobby.css";
 
@@ -22,15 +21,11 @@ export function LandingPage() {
   const [busy, setBusy] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
+  useLobbyMusic();
+
   useEffect(() => {
     if (!isFirebaseConfigured) return;
     return subscribeActiveRooms(setActiveRooms);
-  }, []);
-
-  useEffect(() => {
-    if (isMusicEnabled()) {
-      AudioManager.getInstance().playMusic("ambient-main");
-    }
   }, []);
 
   const requireName = useCallback((): boolean => {

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AudioManager } from "../../audio/AudioManager";
-import type { AudioConfig } from "../../audio/soundRegistry";
+import { DEFAULT_AUDIO_CONFIG, type AudioConfig } from "../../audio/soundRegistry";
 import { getDisplayName, isMusicEnabled, setDisplayName, setMusicEnabled } from "../../lib/playerIdentity";
 import { updatePlayerNameInRoom } from "../../services/roomService";
 import "../ui/overlay.css";
@@ -38,12 +38,15 @@ interface SettingsGearProps {
 }
 
 export function SettingsGear({ roomId, playerId, onDisplayNameChange }: SettingsGearProps) {
+  const audio = AudioManager.getInstance();
   const [open, setOpen] = useState(false);
-  const [config, setConfig] = useState<AudioConfig>(() => AudioManager.getInstance().getConfig());
+  const [config, setConfig] = useState<AudioConfig>(() => audio.getConfig());
   const [musicOn, setMusicOn] = useState(isMusicEnabled);
   const [name, setName] = useState(getDisplayName);
-  const [sfxOn, setSfxOn] = useState(() => !AudioManager.getInstance().getConfig().muted);
-  const audio = AudioManager.getInstance();
+  const [sfxOn, setSfxOn] = useState(() => audio.getConfig().sfxVolume > 0);
+  const savedSfxVolume = useRef(
+    audio.getConfig().sfxVolume > 0 ? audio.getConfig().sfxVolume : DEFAULT_AUDIO_CONFIG.sfxVolume
+  );
 
   const sync = () => setConfig(audio.getConfig());
 
@@ -72,6 +75,7 @@ export function SettingsGear({ roomId, playerId, onDisplayNameChange }: Settings
                 const next = !musicOn;
                 setMusicOn(next);
                 setMusicEnabled(next);
+                audio.unlockFromGesture("settings-music");
                 if (next) audio.playMusic("ambient-main");
                 else audio.stopMusic();
               }}
@@ -89,10 +93,13 @@ export function SettingsGear({ roomId, playerId, onDisplayNameChange }: Settings
               onClick={() => {
                 const next = !sfxOn;
                 setSfxOn(next);
-                if (!next) audio.setVolume("master", config.masterVolume);
-                audio.toggleMute();
+                if (next) {
+                  audio.setVolume("sfx", savedSfxVolume.current);
+                } else {
+                  if (config.sfxVolume > 0) savedSfxVolume.current = config.sfxVolume;
+                  audio.setVolume("sfx", 0);
+                }
                 sync();
-                setSfxOn(!audio.getConfig().muted);
               }}
             >
               {sfxOn ? "ON" : "OFF"}
@@ -149,6 +156,7 @@ export function MusicToggle() {
         setMusicOn(next);
         setMusicEnabled(next);
         const audio = AudioManager.getInstance();
+        audio.unlockFromGesture("music-toggle");
         if (next) audio.playMusic("ambient-main");
         else audio.stopMusic();
       }}

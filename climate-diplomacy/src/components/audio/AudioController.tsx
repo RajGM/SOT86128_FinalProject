@@ -1,14 +1,38 @@
 import { useEffect, useRef } from "react";
 import { useGame } from "../../context/GameContext";
 import { AudioManager, playSound } from "../../audio/AudioManager";
+import { isMusicEnabled } from "../../lib/playerIdentity";
 import { COUNTRY_CONFIGS, type CountryId } from "../../types/hex";
 import type { RegionState } from "../../types/game";
 
 const TEMP_MILESTONES = [1.5, 2.0, 2.5, 3.0];
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
+function selectGameMusic(
+  pendingSummit: boolean,
+  regions: Record<CountryId, RegionState>
+): "ambient-main" | "ambient-tension" | "ambient-summit" | null {
+  if (!isMusicEnabled()) return null;
+  if (pendingSummit) return "ambient-summit";
+  if (anyCountryInCrisis(regions)) return "ambient-tension";
+  return "ambient-main";
+}
+
 function anyCountryInCrisis(regions: Record<CountryId, RegionState>): boolean {
   return ALL_COUNTRIES.some((id) => regions[id].happiness < 30);
+}
+
+function applyGameMusic(
+  pendingSummit: boolean,
+  regions: Record<CountryId, RegionState>
+): void {
+  const track = selectGameMusic(pendingSummit, regions);
+  const audio = AudioManager.getInstance();
+  if (!track) {
+    audio.stopMusic();
+    return;
+  }
+  audio.playMusic(track);
 }
 
 function checkResourceWarnings(
@@ -56,25 +80,20 @@ export function AudioController() {
   });
 
   useEffect(() => {
-    const audio = AudioManager.getInstance();
-    if (gameState.pendingSummitVote) {
-      audio.playMusic("ambient-summit");
-    } else if (anyCountryInCrisis(gameState.regions)) {
-      audio.playMusic("ambient-tension");
-    } else {
-      audio.playMusic("ambient-main");
-    }
+    applyGameMusic(!!gameState.pendingSummitVote, gameState.regions);
   }, [gameState.cycle, gameState.pendingSummitVote, gameState.regions]);
 
   useEffect(() => {
     const start = () => {
-      AudioManager.getInstance().unlock();
-      if (gameState.pendingSummitVote) AudioManager.getInstance().playMusic("ambient-summit");
-      else if (anyCountryInCrisis(gameState.regions)) AudioManager.getInstance().playMusic("ambient-tension");
-      else AudioManager.getInstance().playMusic("ambient-main");
+      AudioManager.getInstance().unlockFromGesture("game");
+      applyGameMusic(!!gameState.pendingSummitVote, gameState.regions);
     };
-    window.addEventListener("pointerdown", start, { once: true });
-    return () => window.removeEventListener("pointerdown", start);
+    window.addEventListener("pointerdown", start, { once: true, capture: true });
+    window.addEventListener("keydown", start, { once: true, capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", start, true);
+      window.removeEventListener("keydown", start, true);
+    };
   }, [gameState.pendingSummitVote, gameState.regions]);
 
   useEffect(() => {
@@ -141,7 +160,7 @@ export function AudioController() {
       const btn = target.closest("button, .overlay-btn, .tab-btn, .tier-option, .build-type-row");
       if (!btn) return;
       if (btn.closest(".audio-settings")) return;
-      AudioManager.getInstance().unlock();
+      AudioManager.getInstance().unlockFromGesture("ui-click");
       playSound("click");
     };
     document.addEventListener("click", onClick, true);

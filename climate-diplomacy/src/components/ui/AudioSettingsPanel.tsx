@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AudioManager } from "../../audio/AudioManager";
+import { AudioManager, playSound } from "../../audio/AudioManager";
 import type { AudioConfig } from "../../audio/soundRegistry";
 import "./overlay.css";
 
@@ -51,8 +51,9 @@ export function AudioSettingsPanel() {
   };
 
   const handleMuteToggle = () => {
+    audio.unlockFromGesture("audio-settings");
     audio.toggleMute();
-    audio.play("toggle");
+    playSound("toggle");
     sync();
   };
 

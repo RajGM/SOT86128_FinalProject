@@ -1,3 +1,4 @@
+import { isMusicEnabled } from "../lib/playerIdentity";
 import {
   AUDIO_STORAGE_KEY,
   DEFAULT_AUDIO_CONFIG,
@@ -9,6 +10,8 @@ import {
 } from "./soundRegistry";
 
 type VolumeCategory = "master" | "music" | "sfx";
+
+const DEV = import.meta.env.DEV;
 
 function loadConfig(): AudioConfig {
   try {
@@ -34,6 +37,18 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function logPlayError(context: string, err: unknown): void {
+  if (!DEV) return;
+  const e = err as { name?: string; message?: string };
+  console.warn(
+    `[Audio] play() failed (${context}):`,
+    e?.name ?? "Error",
+    e?.message ?? err,
+    "| userActivation:",
+    typeof navigator !== "undefined" ? navigator.userActivation?.isActive : "n/a"
+  );
+}
+
 export class AudioManager {
   private static instance: AudioManager;
 
@@ -43,17 +58,19 @@ export class AudioManager {
   private currentMusicId: MusicId | null = null;
   private config: AudioConfig;
   private unlocked = false;
+  private unlockListeners = new Set<() => void>();
+  /** Pre-warmed elements so play() can run synchronously inside a user gesture. */
+  private musicCache = new Map<MusicId, HTMLAudioElement>();
 
   private constructor() {
     this.config = loadConfig();
     if (typeof window !== "undefined") {
-      const unlock = () => {
-        this.unlock();
-        window.removeEventListener("pointerdown", unlock);
-        window.removeEventListener("keydown", unlock);
-      };
-      window.addEventListener("pointerdown", unlock, { once: true });
-      window.addEventListener("keydown", unlock, { once: true });
+      for (const id of Object.keys(MUSIC_REGISTRY) as MusicId[]) {
+        this.warmMusicTrack(id);
+      }
+      const unlock = () => this.unlockFromGesture("window-listener");
+      window.addEventListener("pointerdown", unlock, { once: true, capture: true });
+      window.addEventListener("keydown", unlock, { once: true, capture: true });
     }
   }
 
@@ -68,11 +85,78 @@ export class AudioManager {
     return { ...this.config };
   }
 
-  unlock(): void {
+  isUnlocked(): boolean {
+    return this.unlocked;
+  }
+
+  onUnlockChange(listener: () => void): () => void {
+    this.unlockListeners.add(listener);
+    return () => this.unlockListeners.delete(listener);
+  }
+
+  /** Call only from a user-gesture handler (click / pointerdown / keydown). */
+  unlockFromGesture(source = "unknown"): void {
+    if (this.unlocked) return;
     this.unlocked = true;
-    if (this.music && this.currentMusicId) {
-      void this.music.play().catch(() => undefined);
+    if (DEV) {
+      console.info("[Audio] unlocked via", source);
     }
+    this.primeAudioInGesture();
+    this.notifyUnlock();
+    this.resumeMusic();
+  }
+
+  /** @deprecated Use unlockFromGesture inside event handlers. */
+  unlock(): void {
+    this.unlockFromGesture("unlock()");
+  }
+
+  private notifyUnlock(): void {
+    for (const listener of this.unlockListeners) listener();
+  }
+
+  private warmMusicTrack(trackId: MusicId): void {
+    if (this.musicCache.has(trackId)) return;
+    const def = MUSIC_REGISTRY[trackId];
+    const el = new Audio(def.url);
+    el.loop = true;
+    el.preload = "auto";
+    el.load();
+    this.musicCache.set(trackId, el);
+  }
+
+  /** Play a near-silent clip in the gesture stack so Chrome allows later playback. */
+  private primeAudioInGesture(): void {
+    try {
+      const el = this.getSoundElement("click");
+      const prev = el.volume;
+      el.volume = 0.001;
+      void el
+        .play()
+        .then(() => {
+          el.pause();
+          el.currentTime = 0;
+          el.volume = prev;
+        })
+        .catch((err) => logPlayError("prime", err));
+    } catch {
+      // ignore
+    }
+  }
+
+  /** Call play() synchronously in the user-gesture stack (required by Chrome). */
+  private tryPlay(el: HTMLAudioElement, context: string): void {
+    if (el.readyState < HTMLMediaElement.HAVE_METADATA) {
+      el.load();
+    }
+    void el.play().catch((err) => logPlayError(context, err));
+  }
+
+  private resumeMusic(): void {
+    if (!this.music || !this.currentMusicId || !isMusicEnabled() || this.config.muted) return;
+    this.tryPlay(this.music, "resume-music");
+    const targetVol = this.effectiveMusicVolume(this.currentMusicId);
+    if (targetVol > 0) this.music.volume = targetVol;
   }
 
   private getSoundElement(soundId: SoundId): HTMLAudioElement {
@@ -81,6 +165,7 @@ export class AudioManager {
     if (!el) {
       el = new Audio(def.url);
       el.preload = "auto";
+      el.load();
       this.sounds.set(soundId, el);
     }
     return el;
@@ -105,14 +190,22 @@ export class AudioManager {
     try {
       const clone = el.cloneNode(true) as HTMLAudioElement;
       clone.volume = vol;
-      void clone.play().catch(() => undefined);
+      void clone.play().catch((err) => logPlayError(`sfx:${soundId}`, err));
     } catch {
       // ignore playback errors
     }
   }
 
   playMusic(trackId: MusicId): void {
-    if (this.currentMusicId === trackId && this.music) return;
+    if (!isMusicEnabled()) {
+      this.stopMusic();
+      return;
+    }
+
+    if (this.currentMusicId === trackId && this.music) {
+      if (this.unlocked && !this.config.muted) this.resumeMusic();
+      return;
+    }
 
     const def = MUSIC_REGISTRY[trackId];
     const targetVol = this.effectiveMusicVolume(trackId);
@@ -125,15 +218,14 @@ export class AudioManager {
 
     const previous = this.music;
 
-    const next = new Audio(def.url);
-    next.loop = true;
+    const next = this.getMusicElement(trackId);
+    next.currentTime = 0;
     next.volume = 0;
-    next.preload = "auto";
     this.music = next;
     this.currentMusicId = trackId;
 
     if (this.unlocked && !this.config.muted) {
-      void next.play().catch(() => undefined);
+      this.tryPlay(next, `music:${trackId}`);
     }
 
     const steps = Math.max(1, Math.round(crossfadeMs / 50));
@@ -144,7 +236,7 @@ export class AudioManager {
       step += 1;
       const t = step / steps;
       if (next) next.volume = targetVol * t;
-      if (previous) previous.volume = startPrevVol * (1 - t);
+      if (previous && previous !== next) previous.volume = startPrevVol * (1 - t);
 
       if (step >= steps) {
         if (this.musicFadeId !== null) {
@@ -153,11 +245,15 @@ export class AudioManager {
         }
         if (previous && previous !== next) {
           previous.pause();
-          previous.src = "";
         }
         if (next) next.volume = targetVol;
       }
     }, 50);
+  }
+
+  private getMusicElement(trackId: MusicId): HTMLAudioElement {
+    this.warmMusicTrack(trackId);
+    return this.musicCache.get(trackId)!;
   }
 
   stopMusic(): void {
@@ -167,13 +263,10 @@ export class AudioManager {
     }
     if (this.music) {
       this.music.pause();
-      this.music.src = "";
       this.music = null;
     }
     this.currentMusicId = null;
-  }
-
-  fadeMusic(targetVolume: number, durationMs: number): void {
+  }(targetVolume: number, durationMs: number): void {
     if (!this.music || !this.currentMusicId) return;
     const trackId = this.currentMusicId;
     const maxVol = this.effectiveMusicVolume(trackId);
@@ -217,7 +310,7 @@ export class AudioManager {
       if (this.music) this.music.volume = 0;
     } else if (this.music && this.currentMusicId) {
       this.music.volume = this.effectiveMusicVolume(this.currentMusicId);
-      if (this.unlocked) void this.music.play().catch(() => undefined);
+      if (this.unlocked) this.resumeMusic();
     }
   }
 

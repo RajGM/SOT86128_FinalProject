@@ -13,6 +13,7 @@ import {
 import { startGame } from "../services/gameService";
 import { generateMap } from "../lib/mapGenerator";
 import { MusicToggle, SettingsGear } from "../components/settings/SettingsGear";
+import { useLobbyMusic } from "../hooks/useLobbyMusic";
 import "../components/ui/overlay.css";
 import "../styles/lobby.css";
 
@@ -24,6 +25,8 @@ export function LobbyPage() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const hexes = useMemo(() => generateMap(42), []);
+
+  useLobbyMusic();
 
   useEffect(() => {
     if (!roomId) return;
