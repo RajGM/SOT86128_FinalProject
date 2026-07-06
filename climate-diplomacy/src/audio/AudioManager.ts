@@ -266,7 +266,9 @@ export class AudioManager {
       this.music = null;
     }
     this.currentMusicId = null;
-  }(targetVolume: number, durationMs: number): void {
+  }
+
+  fadeMusic(targetVolume: number, durationMs: number): void {
     if (!this.music || !this.currentMusicId) return;
     const trackId = this.currentMusicId;
     const maxVol = this.effectiveMusicVolume(trackId);
