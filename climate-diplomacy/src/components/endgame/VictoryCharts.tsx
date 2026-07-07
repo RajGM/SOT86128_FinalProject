@@ -28,10 +28,10 @@ export function VictoryRadarChart({
   playerName: string;
   winnerName: string;
 }) {
-  const size = 240;
+  const size = 180;
   const cx = size / 2;
   const cy = size / 2;
-  const maxR = 88;
+  const maxR = 66;
   const labels = METRIC_KEYS.map((k) => METRIC_HEADERS[k].label);
 
   const angleFor = (i: number) => (Math.PI * 2 * i) / labels.length - Math.PI / 2;
@@ -70,8 +70,8 @@ export function VictoryRadarChart({
         ))}
         {METRIC_KEYS.map((_, i) => {
           const a = angleFor(i);
-          const lx = cx + (maxR + 16) * Math.cos(a);
-          const ly = cy + (maxR + 16) * Math.sin(a);
+          const lx = cx + (maxR + 12) * Math.cos(a);
+          const ly = cy + (maxR + 12) * Math.sin(a);
           return (
             <g key={i}>
               <line
@@ -88,7 +88,7 @@ export function VictoryRadarChart({
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill="rgba(255,255,255,0.55)"
-                fontSize={9}
+                fontSize={8}
               >
                 {labels[i]}
               </text>
@@ -120,9 +120,9 @@ export function VictoryTrendChart({
   history: Partial<Record<CountryId, { cycle: number; gap: number }[]>>;
   countryIds: CountryId[];
 }) {
-  const width = 520;
-  const height = 200;
-  const pad = { top: 14, right: 14, bottom: 30, left: 40 };
+  const width = 480;
+  const height = 130;
+  const pad = { top: 10, right: 12, bottom: 22, left: 34 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
 

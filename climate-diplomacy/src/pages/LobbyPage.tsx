@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getDisplayName, getPlayerId } from "../lib/playerIdentity";
 import type { Room } from "../types/multiplayer";
-import { formatPresetLabel } from "../lib/roomPresets";
 import {
   joinRoom,
   leaveRoom,
@@ -119,8 +118,8 @@ export function LobbyPage() {
         <div className="lobby-meta">
           <div>Host: {room.hostName}</div>
           <div>
-            Settings: {formatPresetLabel(room.settings.preset)} preset,{" "}
-            {room.settings.cycleTimerMinutes} min cycles, {room.settings.maxPlayers} max
+            Settings: Standard mid-game scenario, {room.settings.cycleTimerMinutes} min cycles,{" "}
+            {room.settings.maxPlayers} max
           </div>
         </div>
 

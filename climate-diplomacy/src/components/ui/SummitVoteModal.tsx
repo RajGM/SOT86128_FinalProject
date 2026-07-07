@@ -24,11 +24,14 @@ export function SummitVoteModal() {
   const {
     gameState,
     viewCountry,
+    multiplayer,
     castSummitVote,
     autoVoteSummitBots,
     finalizeSummitVote,
   } = useGame();
   const pending = gameState.pendingSummitVote;
+  const isHost = multiplayer?.isHost ?? true;
+  const playerCountry = multiplayer?.assignedCountry ?? viewCountry;
   const [secondsLeft, setSecondsLeft] = useState(30);
   const prevSecondsRef = useRef(secondsLeft);
 
@@ -45,7 +48,7 @@ export function SummitVoteModal() {
     const tick = () => {
       const remaining = Math.max(0, Math.ceil((pending.deadlineAt - Date.now()) / 1000));
       setSecondsLeft(remaining);
-      if (remaining <= 0) {
+      if (remaining <= 0 && isHost) {
         autoVoteSummitBots();
         finalizeSummitVote();
       }
@@ -53,7 +56,7 @@ export function SummitVoteModal() {
     tick();
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
-  }, [pending, autoVoteSummitBots, finalizeSummitVote]);
+  }, [pending, isHost, autoVoteSummitBots, finalizeSummitVote]);
 
   if (!pending) return null;
 
@@ -95,12 +98,16 @@ export function SummitVoteModal() {
           <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 10 }}>
             Majority rule: more YES than NO, with YES ≥ floor(n/2)+1. Abstentions excluded from
             denominator. Vote for each country ({votedCount}/8).
+            {multiplayer && (
+              <span> Cast your vote for {COUNTRY_CONFIGS[playerCountry].name} below.</span>
+            )}
           </p>
 
           <div style={{ display: "grid", gap: 6, maxHeight: 280, overflowY: "auto" }}>
             {ALL_COUNTRIES.map((id) => {
               const vote = pending.votes[id];
-              const isView = id === viewCountry;
+              const isView = id === playerCountry;
+              const canVote = !multiplayer || id === playerCountry;
               return (
                 <div
                   key={id}
@@ -119,35 +126,49 @@ export function SummitVoteModal() {
                   <span style={{ fontSize: 11, color: voteColor(vote), minWidth: 64 }}>
                     {voteLabel(vote)}
                   </span>
-                  <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
-                    {(["yes", "no", "abstain"] as const).map((choice) => (
-                      <button
-                        key={choice}
-                        className={`overlay-btn ${vote === choice ? "primary" : ""}`}
-                        style={{ fontSize: 10, padding: "2px 8px" }}
-                        onClick={() => castSummitVote(id, choice)}
-                      >
-                        {choice.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
+                  {canVote ? (
+                    <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+                      {(["yes", "no", "abstain"] as const).map((choice) => (
+                        <button
+                          key={choice}
+                          className={`overlay-btn ${vote === choice ? "primary" : ""}`}
+                          style={{ fontSize: 10, padding: "2px 8px" }}
+                          onClick={() => castSummitVote(id, choice)}
+                        >
+                          {choice.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <span
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: 10,
+                        color: "rgba(255,255,255,0.35)",
+                      }}
+                    >
+                      {vote ? "Voted" : "Waiting…"}
+                    </span>
+                  )}
                 </div>
               );
             })}
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button className="overlay-btn" onClick={autoVoteSummitBots}>
-              Auto-vote bots
-            </button>
-            <button
-              className="overlay-btn primary"
-              onClick={finalizeSummitVote}
-              disabled={!allVoted && secondsLeft > 0}
-            >
-              {allVoted ? "Finalize vote" : `Waiting (${secondsLeft}s)`}
-            </button>
-          </div>
+          {isHost && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button className="overlay-btn" onClick={autoVoteSummitBots}>
+                Auto-vote bots
+              </button>
+              <button
+                className="overlay-btn primary"
+                onClick={finalizeSummitVote}
+                disabled={!allVoted && secondsLeft > 0}
+              >
+                {allVoted ? "Finalize vote" : `Waiting (${secondsLeft}s)`}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

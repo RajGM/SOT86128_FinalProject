@@ -151,7 +151,7 @@ export function LandingPage() {
                   <div>
                     <div className="active-game-name">{room.hostName}&apos;s game</div>
                     <div className="active-game-meta">
-                      {room.status === "active" ? "In Progress" : "Waiting"} · {room.preset}
+                      {room.status === "active" ? "In Progress" : "Waiting"} · Standard
                     </div>
                   </div>
                   <div className="active-game-meta">

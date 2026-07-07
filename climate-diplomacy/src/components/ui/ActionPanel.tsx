@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useGame } from "../../context/GameContext";
 import { canPlayerBuildOnHex } from "../../lib/buildRules";
 import "./overlay.css";
@@ -6,7 +7,6 @@ export function ActionPanel() {
   const {
     gameState,
     isTestScenario,
-    multiplayer,
     dashboardOpen,
     setDashboardOpen,
     buildPanelOpen,
@@ -16,8 +16,9 @@ export function ActionPanel() {
     advanceCycle,
   } = useGame();
 
-  const showAdvance =
-    gameState.testingMode || (multiplayer?.isHost && !gameState.testingMode);
+  const [expanded, setExpanded] = useState(false);
+
+  const showAdvance = gameState.testingMode;
 
   const showBuildButton = canPlayerBuildOnHex(
     selectedHex,
@@ -25,41 +26,66 @@ export function ActionPanel() {
     playerBuildCountry
   );
 
+  const openDashboard = () => {
+    setDashboardOpen(true);
+    setExpanded(false);
+  };
+
+  const toggleBuild = () => {
+    setBuildPanelOpen(!buildPanelOpen);
+    setExpanded(false);
+  };
+
   return (
-    <div className="action-panel">
-      {isTestScenario && (
-        <span className="test-scenario-badge" title="Cycle 15 mid-game classroom scenario">
-          Test Scenario — Cycle {gameState.cycle}
-        </span>
-      )}
+    <div className={`action-panel ${expanded ? "expanded" : "collapsed"}`}>
       <button
-        className={`overlay-btn ${dashboardOpen ? "active" : ""}`}
-        onClick={() => setDashboardOpen(!dashboardOpen)}
+        type="button"
+        className={`overlay-btn action-toggle ${expanded ? "active" : ""}`}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
       >
-        Actions — Technology / Diplomacy / Trade / Routes / Summit
+        {expanded ? "Close" : "Action"}
       </button>
-      {showBuildButton && (
-        <button
-          className={`overlay-btn primary ${buildPanelOpen ? "active" : ""}`}
-          onClick={() => setBuildPanelOpen(!buildPanelOpen)}
-        >
-          Build
-        </button>
-      )}
-      {showAdvance && (
-        <button
-          className="overlay-btn"
-          onClick={advanceCycle}
-          disabled={!!gameState.pendingSummitVote}
-          style={{ marginLeft: 8 }}
-          title={
-            gameState.pendingSummitVote
-              ? "Complete the summit vote before advancing"
-              : undefined
-          }
-        >
-          Advance Cycle ({gameState.cycle})
-        </button>
+
+      {expanded && (
+        <div className="action-panel-menu overlay-panel">
+          {isTestScenario && (
+            <span className="test-scenario-badge" title="Cycle 15 mid-game classroom scenario">
+              Test Scenario — Cycle {gameState.cycle}
+            </span>
+          )}
+          <button
+            type="button"
+            className={`overlay-btn ${dashboardOpen ? "active" : ""}`}
+            onClick={openDashboard}
+          >
+            Technology / Diplomacy / Trade / Routes / Summit
+          </button>
+          {showBuildButton && (
+            <button
+              type="button"
+              className={`overlay-btn primary ${buildPanelOpen ? "active" : ""}`}
+              onClick={toggleBuild}
+            >
+              Build
+            </button>
+          )}
+          {showAdvance && (
+            <button
+              type="button"
+              className="overlay-btn"
+              onClick={advanceCycle}
+              disabled={!!gameState.pendingSummitVote}
+              title={
+                gameState.pendingSummitVote
+                  ? "Complete the summit vote before advancing"
+                  : undefined
+              }
+            >
+              Advance Cycle ({gameState.cycle})
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

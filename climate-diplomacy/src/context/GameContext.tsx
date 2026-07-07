@@ -189,12 +189,47 @@ export function GameProvider({
 
   useEffect(() => {
     if (!multiplayer?.syncedState || multiplayer.syncedVersion === undefined) return;
-    if (multiplayer.isHost) return;
     if (multiplayer.syncedVersion <= lastSyncedVersion.current) return;
     lastSyncedVersion.current = multiplayer.syncedVersion;
+
+    const remote = hydrateGameState(multiplayer.syncedState, hexes);
+
+    if (multiplayer.isHost) {
+      setGameStateInternal((prev) => {
+        const remotePending = remote.pendingSummitVote;
+        const localPending = prev.pendingSummitVote;
+
+        if (!remotePending && localPending) {
+          skipNextSync.current = true;
+          return remote;
+        }
+
+        if (remotePending && !localPending) {
+          skipNextSync.current = true;
+          return { ...prev, pendingSummitVote: remotePending };
+        }
+
+        if (remotePending && localPending) {
+          const mergedVotes = { ...localPending.votes, ...remotePending.votes };
+          const changed = (Object.keys(COUNTRY_CONFIGS) as CountryId[]).some(
+            (id) => mergedVotes[id] !== localPending.votes[id]
+          );
+          if (!changed) return prev;
+          skipNextSync.current = true;
+          return {
+            ...prev,
+            pendingSummitVote: { ...localPending, votes: mergedVotes },
+          };
+        }
+
+        return prev;
+      });
+      return;
+    }
+
     skipNextSync.current = true;
-    setGameStateInternal(hydrateGameState(multiplayer.syncedState, hexes));
-  }, [multiplayer?.syncedState, multiplayer?.syncedVersion, hexes]);
+    setGameStateInternal(remote);
+  }, [multiplayer?.syncedState, multiplayer?.syncedVersion, multiplayer?.isHost, hexes]);
 
   const hexLookup = useMemo(() => createHexLookup(hexes), [hexes]);
   const [selectedHex, setSelectedHex] = useState<HexData | null>(null);
@@ -1024,6 +1059,8 @@ export function GameProvider({
   };
 
   const castSummitVote = useCallback((countryId: CountryId, choice: SummitVoteChoice) => {
+    if (multiplayer && countryId !== multiplayer.assignedCountry) return;
+
     let voted = false;
     setGameState((prev) => {
       const pending = prev.pendingSummitVote;
@@ -1034,9 +1071,11 @@ export function GameProvider({
       return { ...prev, pendingSummitVote: { ...pending, votes } };
     });
     if (voted) playSound("vote-cast");
-  }, []);
+  }, [multiplayer]);
 
   const autoVoteSummitBots = useCallback(() => {
+    if (multiplayer && !multiplayer.isHost) return;
+
     setGameState((prev) => {
       const pending = prev.pendingSummitVote;
       if (!pending) return prev;
@@ -1049,9 +1088,11 @@ export function GameProvider({
       }
       return { ...prev, pendingSummitVote: { ...pending, votes } };
     });
-  }, []);
+  }, [multiplayer]);
 
   const finalizeSummitVote = useCallback(() => {
+    if (multiplayer && !multiplayer.isHost) return;
+
     let resolutionSound: "resolution-pass" | "resolution-fail" | null = null;
 
     setGameState((prev) => {
@@ -1136,7 +1177,7 @@ export function GameProvider({
       };
     });
     if (resolutionSound) playSound(resolutionSound);
-  }, []);
+  }, [multiplayer]);
 
   const highlightFacilityRoutes = useCallback((countryId: CountryId) => {
     setGameState((prev) => {

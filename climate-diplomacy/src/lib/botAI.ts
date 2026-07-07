@@ -92,17 +92,17 @@ export interface StrategyWeights {
 
 export const STRATEGY_WEIGHTS: Record<BotStrategy, StrategyWeights> = {
   fossil_maximiser: {
-    money: 1.3,
-    energy: 1.0,
+    money: 1.0,
+    energy: 0.9,
     food: 0.5,
     population: 0.3,
     happiness: 0.4,
     technology: 0.3,
-    co2: 0.9,
-    factionAlignment: 0.7,
+    co2: 0.7,
+    factionAlignment: 1.4,
     relations: 0.2,
-    gapPressure: 0.05,
-    fuelStock: 0.8,
+    gapPressure: 0.15,
+    fuelStock: 0.7,
     rareEarthStock: 0.2,
   },
   green_pioneer: {
@@ -112,24 +112,24 @@ export const STRATEGY_WEIGHTS: Record<BotStrategy, StrategyWeights> = {
     population: 0.3,
     happiness: 0.8,
     technology: 0.9,
-    co2: -1.4,
-    factionAlignment: 0.9,
+    co2: -1.2,
+    factionAlignment: 1.5,
     relations: 0.5,
-    gapPressure: 0.35,
+    gapPressure: 0.45,
     fuelStock: -0.2,
     rareEarthStock: 0.3,
   },
   pragmatic_balancer: {
-    money: 1.0,
+    money: 0.9,
     energy: 0.9,
     food: 0.8,
     population: 0.5,
     happiness: 0.7,
     technology: 0.7,
-    co2: -0.4,
-    factionAlignment: 0.5,
+    co2: -0.35,
+    factionAlignment: 1.1,
     relations: 0.4,
-    gapPressure: 0.2,
+    gapPressure: 0.3,
     fuelStock: 0.4,
     rareEarthStock: 0.4,
   },
@@ -141,9 +141,9 @@ export const STRATEGY_WEIGHTS: Record<BotStrategy, StrategyWeights> = {
     happiness: 0.6,
     technology: 0.8,
     co2: -0.15,
-    factionAlignment: 0.4,
+    factionAlignment: 1.0,
     relations: 0.35,
-    gapPressure: 0.15,
+    gapPressure: 0.25,
     fuelStock: 0.5,
     rareEarthStock: 0.35,
   },
@@ -154,10 +154,76 @@ const FUEL_EXPORTERS: CountryId[] = ["opec", "russia"];
 const TECH_EXPORTERS: CountryId[] = ["eu", "china"];
 const RARE_EARTH_EXPORTER: CountryId = "china";
 
-const BUILD_ACTION_THRESHOLD = 0.35;
-const TRADE_ACTION_THRESHOLD = 0.25;
-const TAX_ADJUST_INTERVAL = 3;
+/** Minimum simulated utility gain to prefer a build (lower = more willing to act). */
+const BUILD_ACTION_THRESHOLD = 0.06;
+/** Accept marginal trades when resources are tight. */
+const TRADE_ACTION_THRESHOLD = 0.04;
+/** Fallback build when no action passed thresholds — still require affordable placement. */
+const BUILD_FALLBACK_THRESHOLD = -0.25;
+const TAX_ADJUST_INTERVAL = 1;
 const RELATION_PREFER_THRESHOLD = 40;
+
+const ENERGY_EXPORTERS: CountryId[] = ["russia", "opec", "china", "usa"];
+
+function botLog(message: string, detail?: unknown): void {
+  if (
+    typeof import.meta !== "undefined" &&
+    import.meta.env?.DEV &&
+    typeof globalThis !== "undefined" &&
+    (globalThis as { __BOT_AI_DEBUG__?: boolean }).__BOT_AI_DEBUG__
+  ) {
+    console.log("[botAI]", message, detail ?? "");
+  }
+}
+
+function countryGreenLean(countryId: CountryId): number {
+  const profile = REGION_PROFILES[countryId];
+  const total = profile.legacyBrown + profile.legacyGreen;
+  return total > 0 ? profile.legacyGreen / total : 0.5;
+}
+
+function getLatestGapScore(state: GameState, countryId: CountryId): number {
+  const history = state.gapScoreHistory[countryId];
+  if (!history?.length) return 0;
+  return history[history.length - 1].gap;
+}
+
+/** Estimated faction satisfaction swing from placing one building (cycle-end deltas). */
+export function estimateFactionDeltaFromBuild(
+  countryId: CountryId,
+  buildType: BuildType
+): number {
+  const greenLean = countryGreenLean(countryId);
+  let brown = 0;
+  let green = 0;
+  switch (buildType) {
+    case "fossil_plant":
+      brown += 5;
+      green -= 5;
+      break;
+    case "green_plant":
+    case "nuclear_plant":
+      green += 5;
+      brown -= 3;
+      break;
+    case "extractor":
+      brown += 3;
+      green -= 2;
+      break;
+    case "industrial_complex":
+      brown += 4;
+      break;
+    case "manufacturing":
+      green += 3;
+      break;
+    case "farm":
+      green += 2;
+      break;
+    default:
+      break;
+  }
+  return greenLean * green + (1 - greenLean) * brown;
+}
 
 function norm(value: number, scale: number): number {
   if (scale <= 0) return 0;
@@ -203,9 +269,10 @@ export function scoreState(
   score += w.happiness * norm(region.happiness, 100);
   score += w.technology * norm(region.technology, 100);
   score += w.co2 * norm(region.co2, 100);
-  score += w.factionAlignment * norm(factionAlignmentScore(countryId, region), 100);
+  score += w.factionAlignment * norm(factionAlignmentScore(countryId, region), 100) * 1.35;
   score += w.relations * norm(averageRelations(region), 100);
-  score += w.gapPressure * gapScore;
+  // Priority 2: strategic gap pressure (lower gap = better for green/development archetypes)
+  score += w.gapPressure * (strategy === "green_pioneer" ? -gapScore : gapScore * 0.35);
   score += w.fuelStock * norm(region.deposits.fuel, 40);
   score += w.rareEarthStock * norm(region.deposits.rare_earth, 30);
   return score;
@@ -348,7 +415,8 @@ function simulateBuildOutcome(
   tier: 1 | 2 | 3,
   hex: HexData,
   baseCost: number,
-  techCost: number
+  techCost: number,
+  gapScore = 0
 ): number {
   const afterSpend: RegionState = {
     ...region,
@@ -366,7 +434,9 @@ function simulateBuildOutcome(
     };
   }
 
-  return scoreDelta(region, afterYield, countryId, strategy);
+  const utilityDelta = scoreDelta(region, afterYield, countryId, strategy, gapScore, gapScore);
+  const factionBoost = estimateFactionDeltaFromBuild(countryId, buildType) * 0.12;
+  return utilityDelta + factionBoost;
 }
 
 function createBotBuilding(
@@ -387,27 +457,42 @@ function createBotBuilding(
   };
 }
 
-function tryPlaceBuild(state: GameState, hexes: HexData[], countryId: CountryId): GameState | null {
+function findBestBuild(
+  state: GameState,
+  hexes: HexData[],
+  countryId: CountryId,
+  tierCap: 1 | 2 = 2
+): { gain: number; buildType: BuildType; tier: 1 | 2 | 3; hex: HexData; cost: number; techCost: number; greenSubsidyPool: number } | null {
   const region = state.regions[countryId];
   if (isConstructionBlocked(region.happiness)) return null;
 
   const drain = computePerCapitaConsumption(region.population);
-  const foodPressure = region.food < drain.food * 4;
-  const energyPressure = region.energy < drain.energy * 4;
-  const fuelPressure = region.deposits.fuel < 5;
+  const foodPressure = region.food < drain.food * 5;
+  const energyPressure = region.energy < drain.energy * 5;
+  const fuelPressure = region.deposits.fuel < 8;
   const strategy = BOT_STRATEGY_BY_COUNTRY[countryId];
   const priorities = buildPriority(strategy, foodPressure, energyPressure, fuelPressure);
   const occupied = new Set(Object.keys(state.tileBuildings));
   const hexLookup = createHexLookup(hexes);
+  const gapScore = getLatestGapScore(state, countryId);
 
-  let best: { gain: number; buildType: BuildType; tier: 1 | 2 | 3; hex: HexData; cost: number; techCost: number; greenSubsidyPool: number } | null = null;
+  let best: {
+    gain: number;
+    buildType: BuildType;
+    tier: 1 | 2 | 3;
+    hex: HexData;
+    cost: number;
+    techCost: number;
+    greenSubsidyPool: number;
+  } | null = null;
 
   for (const buildType of priorities) {
     const build = getBuildDefinition(buildType);
-    const candidateHexes = findCandidateHexes(hexes, countryId, buildType, occupied);
+    const candidateHexes = findCandidateHexes(hexes, countryId, buildType, occupied, 6);
 
     for (const hex of candidateHexes) {
       for (const tier of [1, 2] as const) {
+        if (tier > tierCap) continue;
         const key = tileKey(hex.q, hex.r);
         if (state.tileBuildings[key]) continue;
 
@@ -430,12 +515,42 @@ function tryPlaceBuild(state: GameState, hexes: HexData[], countryId: CountryId)
 
         if (tier === 2) {
           const tier1Cost = getBuildCost(build, 1);
-          const tier1Gain = simulateBuildOutcome(region, countryId, strategy, buildType, 1, hex, tier1Cost, getBuildTechCost(build, 1));
-          const tier2Gain = simulateBuildOutcome(region, countryId, strategy, buildType, 2, hex, cost, techCost);
-          if (tier2Gain < tier1Gain * 1.15) continue;
+          const tier1Gain = simulateBuildOutcome(
+            region,
+            countryId,
+            strategy,
+            buildType,
+            1,
+            hex,
+            tier1Cost,
+            getBuildTechCost(build, 1),
+            gapScore
+          );
+          const tier2Gain = simulateBuildOutcome(
+            region,
+            countryId,
+            strategy,
+            buildType,
+            2,
+            hex,
+            cost,
+            techCost,
+            gapScore
+          );
+          if (tier2Gain < tier1Gain * 1.08) continue;
         }
 
-        const gain = simulateBuildOutcome(region, countryId, strategy, buildType, tier, hex, cost, techCost);
+        const gain = simulateBuildOutcome(
+          region,
+          countryId,
+          strategy,
+          buildType,
+          tier,
+          hex,
+          cost,
+          techCost,
+          gapScore
+        );
         if (!best || gain > best.gain) {
           best = { gain, buildType, tier, hex, cost, techCost, greenSubsidyPool };
         }
@@ -443,8 +558,22 @@ function tryPlaceBuild(state: GameState, hexes: HexData[], countryId: CountryId)
     }
   }
 
-  if (!best || best.gain < BUILD_ACTION_THRESHOLD) return null;
+  return best;
+}
 
+function applyBuildChoice(
+  state: GameState,
+  countryId: CountryId,
+  best: {
+    buildType: BuildType;
+    tier: 1 | 2 | 3;
+    hex: HexData;
+    cost: number;
+    techCost: number;
+    greenSubsidyPool: number;
+  }
+): GameState {
+  const region = state.regions[countryId];
   const key = tileKey(best.hex.q, best.hex.r);
   const newBuilding = createBotBuilding(best.buildType, best.tier, best.hex, countryId, state.cycle);
   const prevEvents = state.factionCycleEvents[countryId] ?? createEmptyFactionCycleEvents();
@@ -467,6 +596,18 @@ function tryPlaceBuild(state: GameState, hexes: HexData[], countryId: CountryId)
       },
     },
   };
+}
+
+function tryPlaceBuild(
+  state: GameState,
+  hexes: HexData[],
+  countryId: CountryId,
+  minGain = BUILD_ACTION_THRESHOLD
+): GameState | null {
+  const best = findBestBuild(state, hexes, countryId);
+  if (!best || best.gain < minGain) return null;
+  botLog(`${countryId} build`, { type: best.buildType, tier: best.tier, gain: best.gain });
+  return applyBuildChoice(state, countryId, best);
 }
 
 interface TradeCandidate {
@@ -553,12 +694,13 @@ function collectTradeCandidates(state: GameState, countryId: CountryId): TradeCa
   const drain = computePerCapitaConsumption(region.population);
   const candidates: TradeCandidate[] = [];
 
-  const desperateFood = region.food < drain.food * 2;
+  const desperateFood = region.food < drain.food * 2.5;
+  const desperateEnergy = region.energy < drain.energy * 2.5;
   const desperateFuel = region.deposits.fuel < 2;
-  const desperateTech = region.technology < 25;
+  const desperateTech = region.technology < 30;
 
   // Food buyer
-  if (region.food < drain.food * 3) {
+  if (region.food < drain.food * 4) {
     const amount = Math.min(15, Math.max(5, Math.ceil(drain.food * 2)));
     for (const sellerId of FOOD_EXPORTERS) {
       if (sellerId === countryId) continue;
@@ -571,9 +713,24 @@ function collectTradeCandidates(state: GameState, countryId: CountryId): TradeCa
     }
   }
 
+  // Energy buyer
+  if (region.energy < drain.energy * 4) {
+    const amount = Math.min(20, Math.max(6, Math.ceil(drain.energy * 2.5)));
+    for (const sellerId of ENERGY_EXPORTERS) {
+      if (sellerId === countryId) continue;
+      const seller = state.regions[sellerId];
+      if (seller.energy < amount + drain.energy) continue;
+      const relScore = partnerScore(state.regions, sellerId, countryId, desperateEnergy);
+      if (relScore < 0) continue;
+      const utilityGain =
+        evaluateTrade(state, sellerId, countryId, "energy", amount, countryId) + relScore * 0.012;
+      candidates.push({ sellerId, buyerId: countryId, item: "energy", amount, utilityGain });
+    }
+  }
+
   // Fuel buyer (manufacturing / industrial countries)
   const needsFuel =
-    region.deposits.fuel < 8 &&
+    region.deposits.fuel < 10 &&
     (BOT_STRATEGY_BY_COUNTRY[countryId] !== "green_pioneer" || desperateFuel);
   if (needsFuel) {
     const amount = Math.min(12, Math.max(4, 10 - region.deposits.fuel));
@@ -589,7 +746,7 @@ function collectTradeCandidates(state: GameState, countryId: CountryId): TradeCa
   }
 
   // Tech buyer
-  if (region.technology < 40) {
+  if (region.technology < 50) {
     const amount = Math.min(10, Math.max(3, 40 - region.technology));
     for (const sellerId of TECH_EXPORTERS) {
       if (sellerId === countryId) continue;
@@ -653,9 +810,14 @@ function collectTradeCandidates(state: GameState, countryId: CountryId): TradeCa
   return candidates;
 }
 
-function tryTrade(state: GameState, hexes: HexData[], countryId: CountryId): GameState | null {
+function tryTrade(
+  state: GameState,
+  hexes: HexData[],
+  countryId: CountryId,
+  minGain = TRADE_ACTION_THRESHOLD
+): GameState | null {
   const candidates = collectTradeCandidates(state, countryId)
-    .filter((c) => c.utilityGain > TRADE_ACTION_THRESHOLD)
+    .filter((c) => c.utilityGain > minGain)
     .sort((a, b) => b.utilityGain - a.utilityGain);
 
   for (const candidate of candidates) {
@@ -677,6 +839,7 @@ function tryTrade(state: GameState, hexes: HexData[], countryId: CountryId): Gam
       "one_time"
     );
 
+    botLog(`${countryId} trade`, { item, amount, from: sellerId, to: buyerId, gain: candidate.utilityGain });
     return {
       ...state,
       transportRoutes: tradePath.transportRoutes,
@@ -713,32 +876,50 @@ function targetCarbonTax(
 ): number {
   const floor = getCarbonTaxFloor(state, countryId);
   const ceiling = getCarbonTaxCeiling(state, countryId) ?? 100;
+  const greenLean = countryGreenLean(countryId);
+  const brownUnhappy = region.factions.brownSatisfaction < 42;
+  const greenUnhappy = region.factions.greenSatisfaction < 42;
 
+  let target: number;
   switch (strategy) {
     case "fossil_maximiser":
-      return floor;
+      target = floor;
+      if (brownUnhappy && region.carbonTax > floor) {
+        target = Math.max(floor, region.carbonTax - 5);
+      }
+      break;
     case "green_pioneer": {
-      const target = region.money > 35 ? 70 : 55;
-      return Math.max(floor, Math.min(ceiling, target));
+      const base = region.money > 35 ? (greenLean > 0.6 ? 72 : 62) : 50;
+      target = Math.max(floor, Math.min(ceiling, base));
+      if (greenUnhappy) target = Math.min(ceiling, target + 8);
+      break;
     }
     case "development_first":
-      return floor > 0 ? floor : Math.min(ceiling, 10);
+      target = floor > 0 ? floor : Math.min(ceiling, greenUnhappy ? 15 : 8);
+      break;
     case "pragmatic_balancer": {
       const emissionsPressure = region.co2 > 50 ? 35 : region.co2 > 30 ? 25 : 15;
       const affordable = region.money > 30 ? emissionsPressure : floor;
-      return Math.max(floor, Math.min(ceiling, affordable));
+      target = Math.max(floor, Math.min(ceiling, affordable));
+      if (greenLean > 0.55 && greenUnhappy) target = Math.min(ceiling, target + 6);
+      if (greenLean < 0.45 && brownUnhappy) target = Math.max(floor, target - 6);
+      break;
     }
+    default:
+      target = floor;
   }
+
+  return Math.max(floor, Math.min(ceiling, target));
 }
 
-function tryAdjustCarbonTax(state: GameState, countryId: CountryId): GameState {
+function tryAdjustCarbonTax(state: GameState, countryId: CountryId, force = false): GameState {
   const region = state.regions[countryId];
   const strategy = BOT_STRATEGY_BY_COUNTRY[countryId];
   const floor = getCarbonTaxFloor(state, countryId);
   const needsCompliance = region.carbonTax < floor;
   const onSchedule = state.cycle % TAX_ADJUST_INTERVAL === 0;
 
-  if (!needsCompliance && !onSchedule) return state;
+  if (!force && !needsCompliance && !onSchedule) return state;
 
   const ceiling = getCarbonTaxCeiling(state, countryId) ?? 100;
   const target = targetCarbonTax(state, countryId, strategy, region);
@@ -747,6 +928,7 @@ function tryAdjustCarbonTax(state: GameState, countryId: CountryId): GameState {
 
   if (clamped === region.carbonTax && region.carbonTaxRecycling === recycling) return state;
 
+  botLog(`${countryId} tax`, { from: region.carbonTax, to: clamped, recycling });
   return {
     ...state,
     regions: {
@@ -895,14 +1077,42 @@ export function runBotTurns(
   let next = state;
 
   for (const countryId of botCountries) {
+    let acted = false;
+
     const afterTax = tryAdjustCarbonTax(next, countryId);
-    if (afterTax !== next) next = afterTax;
+    if (afterTax !== next) {
+      next = afterTax;
+      acted = true;
+    }
 
     const afterBuild = tryPlaceBuild(next, hexes, countryId);
-    if (afterBuild) next = afterBuild;
+    if (afterBuild) {
+      next = afterBuild;
+      acted = true;
+    }
 
     const afterTrade = tryTrade(next, hexes, countryId);
-    if (afterTrade) next = afterTrade;
+    if (afterTrade) {
+      next = afterTrade;
+      acted = true;
+    }
+
+    if (!acted) {
+      const fallbackBuild = tryPlaceBuild(next, hexes, countryId, BUILD_FALLBACK_THRESHOLD);
+      if (fallbackBuild) {
+        next = fallbackBuild;
+        acted = true;
+      } else {
+        const fallbackTrade = tryTrade(next, hexes, countryId, -0.05);
+        if (fallbackTrade) {
+          next = fallbackTrade;
+          acted = true;
+        } else {
+          const forcedTax = tryAdjustCarbonTax(next, countryId, true);
+          if (forcedTax !== next) next = forcedTax;
+        }
+      }
+    }
   }
 
   return next;

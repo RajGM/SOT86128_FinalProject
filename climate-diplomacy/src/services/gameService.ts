@@ -18,6 +18,7 @@ import type {
   PlayerResult,
   Room,
 } from "../types/multiplayer";
+import { MULTIPLAYER_CYCLE_MS } from "../config/constants";
 import {
   assignCountriesToPlayers,
   createGameStateFromSettings,
@@ -57,11 +58,11 @@ export async function startGame(
   }
   const gameData: GameData = {
     roomId: room.roomId,
-    cycle: 1,
+    cycle: gameState.cycle,
     gameState,
     cycleTimer: {
       startedAt: now,
-      durationMs: room.settings.cycleTimerMinutes * 60 * 1000,
+      durationMs: MULTIPLAYER_CYCLE_MS,
     },
     humanPlayers,
     botControlled,
@@ -101,17 +102,30 @@ export async function getGame(roomId: string): Promise<GameData | null> {
 }
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
-let localVersion = 0;
+/** Highest stateVersion seen from Firebase — shared counter must not fall behind remote. */
+let knownRemoteVersion = 0;
+
+/** Keep the local write counter aligned with Firebase (call on every subscribe update). */
+export function setStateVersionBaseline(version: number): void {
+  if (version > knownRemoteVersion) {
+    knownRemoteVersion = version;
+  }
+}
+
+function bumpStateVersion(): number {
+  knownRemoteVersion += 1;
+  return knownRemoteVersion;
+}
 
 export function syncGameState(roomId: string, gameState: GameState): void {
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    localVersion += 1;
+    const version = bumpStateVersion();
     const db = getFirebaseDb();
     void update(ref(db, `games/${roomId}`), {
       gameState,
       cycle: gameState.cycle,
-      stateVersion: localVersion,
+      stateVersion: version,
       lastActivity: Date.now(),
     });
   }, 300);
@@ -121,12 +135,13 @@ export async function pushGameStateImmediate(
   roomId: string,
   gameState: GameState
 ): Promise<void> {
-  localVersion += 1;
+  const version = bumpStateVersion();
   const db = getFirebaseDb();
   await update(ref(db, `games/${roomId}`), {
     gameState,
     cycle: gameState.cycle,
-    stateVersion: localVersion,
+    stateVersion: version,
+    lastActivity: Date.now(),
   });
 }
 

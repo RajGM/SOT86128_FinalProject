@@ -195,20 +195,10 @@ export function HexMap({ hexes, multiplayerMode = false }: HexMapProps) {
       </div>
 
       {selectedHex && (
-        <div
-          style={{
-            position: "absolute",
-            top: 100,
-            right: 16,
-            background: "rgba(0,0,0,0.85)",
-            color: "#fff",
-            borderRadius: 8,
+        <div className="hex-info-fixed overlay-panel" style={{
             padding: "12px 16px",
             fontSize: 12,
             lineHeight: 1.6,
-            backdropFilter: "blur(8px)",
-            minWidth: 180,
-            zIndex: 10,
           }}
         >
           <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
@@ -248,57 +238,24 @@ export function HexMap({ hexes, multiplayerMode = false }: HexMapProps) {
 
       {!multiplayerMode && (
         <div
+          className="overlay-panel"
           style={{
-            position: "absolute",
-            top: 56,
+            position: "fixed",
+            top: "var(--hud-top-offset)",
             left: "50%",
             transform: "translateX(-50%)",
-            background: "rgba(0,0,0,0.7)",
-            color: "#fff",
-            borderRadius: 8,
             padding: "6px 16px",
             fontSize: 14,
             fontWeight: 700,
             letterSpacing: 1,
-            backdropFilter: "blur(8px)",
-            zIndex: 5,
+            zIndex: 140,
           }}
         >
           Climate Diplomacy — Testing Mode
         </div>
       )}
 
-      {multiplayerMode && multiplayer && (
-        <div
-          style={{
-            position: "absolute",
-            top: 56,
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "rgba(0,0,0,0.7)",
-            color: "#fff",
-            borderRadius: 8,
-            padding: "6px 16px",
-            fontSize: 13,
-            fontWeight: 600,
-            backdropFilter: "blur(8px)",
-            zIndex: 5,
-          }}
-        >
-          Multiplayer — {multiplayer.assignedCountry.toUpperCase()}
-        </div>
-      )}
-
-      <div
-        style={{
-          position: "absolute",
-          bottom: 56,
-          right: 16,
-          color: "rgba(255,255,255,0.4)",
-          fontSize: 10,
-          zIndex: 5,
-        }}
-      >
+      <div className="map-hint-fixed">
         Scroll to zoom · Drag to pan · Click hex{multiplayerMode ? " for info" : " to build"}
       </div>
     </div>

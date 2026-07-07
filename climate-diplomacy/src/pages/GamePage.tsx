@@ -11,7 +11,9 @@ import {
   pushGameStateImmediate,
   setBotControlled,
   subscribeGame,
+  setStateVersionBaseline,
   syncGameState,
+  updateCycleTimer,
   updateHumanPlayerMeta,
 } from "../services/gameService";
 import {
@@ -23,9 +25,11 @@ import {
   subscribeRoom,
 } from "../services/roomService";
 import { GameTopBar } from "../components/game/GameTopBar";
+import { MultiplayerCycleController } from "../components/game/MultiplayerCycleController";
 import { StatsScreen } from "../components/endgame/StatsScreen";
 import { EndGameVoteModal, useEndGameVote } from "../components/endgame/EndGameVoteModal";
 import { SettingsGear } from "../components/settings/SettingsGear";
+import { MULTIPLAYER_CYCLE_MS } from "../config/constants";
 import { STATS_VIEW_MS, ARCHIVE_GRACE_MS } from "../lib/scoring";
 import "../components/ui/overlay.css";
 
@@ -51,6 +55,12 @@ export function GamePage() {
     if (!roomId) return;
     return subscribeGame(roomId, setGameData);
   }, [roomId]);
+
+  useEffect(() => {
+    if (gameData?.stateVersion != null) {
+      setStateVersionBaseline(gameData.stateVersion);
+    }
+  }, [gameData?.stateVersion]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -123,14 +133,20 @@ export function GamePage() {
   const handleStateSync = useCallback(
     (state: import("../types/game").GameState) => {
       if (!roomId) return;
-      if (isHost) {
-        syncGameState(roomId, state);
-      } else {
+      const summitActive = !!state.pendingSummitVote;
+      if (isHost || summitActive) {
         void pushGameStateImmediate(roomId, state);
+      } else {
+        syncGameState(roomId, state);
       }
     },
     [roomId, isHost]
   );
+
+  const handleCycleTimerReset = useCallback(() => {
+    if (!roomId || !isHost) return;
+    void updateCycleTimer(roomId, Date.now(), MULTIPLAYER_CYCLE_MS);
+  }, [roomId, isHost]);
 
   const multiplayerConfig = useMemo((): MultiplayerConfig | null => {
     if (!gameData || !assignedCountry) return null;
@@ -252,12 +268,16 @@ export function GamePage() {
         isTestScenario={false}
         multiplayer={multiplayerConfig}
       >
-        <div style={{ position: "relative", height: "100vh", paddingTop: 44 }}>
+        <div style={{ position: "relative", height: "100vh" }} className="game-shell game-shell--multiplayer">
           <GameTopBar
             onExit={() => void handleExit()}
             onEndGame={() => void handleEndGameVote()}
             onHostEnd={() => void handleHostEnd()}
             cycleRemainingSec={cycleRemainingSec}
+          />
+          <MultiplayerCycleController
+            cycleTimer={gameData.cycleTimer}
+            onTimerReset={handleCycleTimerReset}
           />
           <HexMap hexes={hexes} multiplayerMode />
         </div>

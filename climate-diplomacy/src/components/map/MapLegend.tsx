@@ -6,18 +6,10 @@ interface MapLegendProps {
 
 export function MapLegend({ countryCounts }: MapLegendProps) {
   return (
-    <div style={{
-      position: "absolute",
-      bottom: 16,
-      left: 16,
-      background: "rgba(0,0,0,0.85)",
-      color: "#fff",
-      borderRadius: 8,
+    <div className="map-legend-fixed overlay-panel" style={{
       padding: "12px 16px",
       fontSize: 11,
       lineHeight: 1.8,
-      backdropFilter: "blur(8px)",
-      maxWidth: 200,
     }}>
       <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 12 }}>Countries</div>
       {(Object.keys(COUNTRY_CONFIGS) as CountryId[]).map((id) => (

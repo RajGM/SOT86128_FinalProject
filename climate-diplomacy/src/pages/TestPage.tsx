@@ -54,7 +54,9 @@ function TestGameInner({
   return (
     <>
       <TestEndGameControls onShowResults={onShowResults} />
-      <HexMap hexes={hexes} />
+      <div className="game-shell game-shell--test" style={{ height: "100vh" }}>
+        <HexMap hexes={hexes} />
+      </div>
     </>
   );
 }

@@ -3,10 +3,13 @@
  */
 import { generateMap } from "../src/lib/mapGenerator";
 import { createInitialGameState } from "../src/lib/gameState";
+import { createGameStateFromSettings } from "../src/lib/gameBootstrap";
+import { DEFAULT_ROOM_SETTINGS } from "../src/lib/roomPresets";
 import {
   BOT_STRATEGY_BY_COUNTRY,
   STRATEGY_WEIGHTS,
   computeBotVote,
+  estimateFactionDeltaFromBuild,
   foodCyclesUntilEmpty,
   resolveBotCountries,
   runBotTurns,
@@ -60,6 +63,7 @@ const greenW = STRATEGY_WEIGHTS.green_pioneer;
 
 check("Fossil strategy weights CO₂ positively", fossilW.co2 > 0);
 check("Green strategy weights CO₂ negatively", greenW.co2 < 0);
+check("Faction alignment weighted heavily", greenW.factionAlignment >= 1.4);
 
 const richOpec = cloneRegion(opec);
 richOpec.money = 120;
@@ -94,6 +98,15 @@ after.technology += 10;
 check(
   "scoreDelta matches scoreState difference",
   Math.abs(scoreDelta(before, after, "china", "pragmatic_balancer") - (scoreState(after, "china", "pragmatic_balancer") - scoreState(before, "china", "pragmatic_balancer"))) < 0.001
+);
+
+check(
+  "Green builds score higher for EU than fossil builds",
+  estimateFactionDeltaFromBuild("eu", "green_plant") > estimateFactionDeltaFromBuild("eu", "fossil_plant")
+);
+check(
+  "Fossil builds score higher for OPEC than green builds",
+  estimateFactionDeltaFromBuild("opec", "fossil_plant") > estimateFactionDeltaFromBuild("opec", "green_plant")
 );
 
 // --- Summit votes ---
@@ -151,6 +164,24 @@ const richOpecState = {
 const opecAfter = runBotTurns(richOpecState, hexes, ["opec"]);
 const opecBuilds = Object.values(opecAfter.tileBuildings).filter((b) => b.countryId === "opec");
 check("OPEC bot places building when funded", opecBuilds.length >= 1);
+
+// --- Multiplayer bootstrap (test scenario, real rules) ---
+const mpState = createGameStateFromSettings(hexes, DEFAULT_ROOM_SETTINGS);
+check("Multiplayer state uses real build rules", mpState.testingMode === false);
+check("Multiplayer state is rich mid-game", mpState.cycle >= 10);
+check("Multiplayer state has trade routes", mpState.transportRoutes.length > 0);
+
+const mpBots = resolveBotCountries(["usa"]);
+const mpBefore = {
+  tradeCount: mpState.tradeAgreements.length,
+  buildCount: Object.keys(mpState.tileBuildings).length,
+};
+const mpAfter = runBotTurns(mpState, hexes, mpBots.slice(0, 3));
+const mpActed =
+  mpAfter.tradeAgreements.length > mpBefore.tradeCount ||
+  Object.keys(mpAfter.tileBuildings).length > mpBefore.buildCount ||
+  mpAfter.regions.eu.carbonTax !== mpState.regions.eu.carbonTax;
+check("Bots act on multiplayer test-scenario state", mpActed);
 
 // --- foodCyclesUntilEmpty ---
 check("foodCyclesUntilEmpty handles zero drain", foodCyclesUntilEmpty(100, 0) === Infinity);
