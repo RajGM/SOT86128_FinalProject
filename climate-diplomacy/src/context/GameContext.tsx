@@ -18,12 +18,10 @@ import type {
   TradeMode,
   TransitFeeModel,
   CarbonTaxRecycling,
-  SummitVoteChoice,
 } from "../types/game";
 import {
   applyClimateFinanceGivenRelation,
   applyOneSidedRelation,
-  applyAllSummitVoteRelations,
   applyTradeRelationEffects,
   applyTransitApprovedRelations,
   canInitiateTrade,
@@ -80,16 +78,11 @@ import {
   snapCarbonTaxRate,
 } from "../lib/carbonTaxMechanics";
 import {
-  activateResolution,
-  computeBotVote,
   getCarbonTaxCeiling,
   getCarbonTaxFloor,
-  isCeilingResolution,
   isTradeRestrictionSuspended,
   recordCompletedTransfer,
   recordTradeOffer,
-  replaceSupersededResolutions,
-  tallySummitVote,
 } from "../lib/summitMechanics";
 import { playSound } from "../audio/AudioManager";
 import { resolveBotCountries, runBotTurns } from "../lib/botAI";
@@ -156,9 +149,6 @@ interface GameContextValue {
   dismissRelationAlerts: () => void;
   setCarbonTax: (countryId: CountryId, newRate: number) => void;
   setCarbonTaxRecycling: (countryId: CountryId, recycling: CarbonTaxRecycling) => void;
-  castSummitVote: (countryId: CountryId, choice: SummitVoteChoice) => void;
-  autoVoteSummitBots: () => void;
-  finalizeSummitVote: () => void;
   highlightFacilityRoutes: (countryId: CountryId) => void;
   clearHighlightedRoutes: () => void;
 }
@@ -186,49 +176,23 @@ export function GameProvider({
   );
   const lastSyncedVersion = useRef(0);
   const skipNextSync = useRef(false);
+  const syncAllowedRef = useRef(!multiplayer);
 
   useEffect(() => {
     if (!multiplayer?.syncedState || multiplayer.syncedVersion === undefined) return;
     if (multiplayer.syncedVersion <= lastSyncedVersion.current) return;
+
     lastSyncedVersion.current = multiplayer.syncedVersion;
+    syncAllowedRef.current = true;
 
-    const remote = hydrateGameState(multiplayer.syncedState, hexes);
+    if (multiplayer.isHost) return;
 
-    if (multiplayer.isHost) {
-      setGameStateInternal((prev) => {
-        const remotePending = remote.pendingSummitVote;
-        const localPending = prev.pendingSummitVote;
-
-        if (!remotePending && localPending) {
-          skipNextSync.current = true;
-          return remote;
-        }
-
-        if (remotePending && !localPending) {
-          skipNextSync.current = true;
-          return { ...prev, pendingSummitVote: remotePending };
-        }
-
-        if (remotePending && localPending) {
-          const mergedVotes = { ...localPending.votes, ...remotePending.votes };
-          const changed = (Object.keys(COUNTRY_CONFIGS) as CountryId[]).some(
-            (id) => mergedVotes[id] !== localPending.votes[id]
-          );
-          if (!changed) return prev;
-          skipNextSync.current = true;
-          return {
-            ...prev,
-            pendingSummitVote: { ...localPending, votes: mergedVotes },
-          };
-        }
-
-        return prev;
-      });
-      return;
-    }
-
-    skipNextSync.current = true;
-    setGameStateInternal(remote);
+    setGameStateInternal((prev) => {
+      const remote = hydrateGameState(multiplayer.syncedState!, hexes);
+      if (remote === prev) return prev;
+      skipNextSync.current = true;
+      return remote;
+    });
   }, [multiplayer?.syncedState, multiplayer?.syncedVersion, multiplayer?.isHost, hexes]);
 
   const hexLookup = useMemo(() => createHexLookup(hexes), [hexes]);
@@ -254,7 +218,7 @@ export function GameProvider({
     (updater: GameState | ((prev: GameState) => GameState)) => {
       setGameStateInternal((prev) => {
         const next = typeof updater === "function" ? updater(prev) : updater;
-        if (multiplayer?.onStateSync && !skipNextSync.current) {
+        if (multiplayer?.onStateSync && !skipNextSync.current && syncAllowedRef.current) {
           multiplayer.onStateSync(next);
         }
         skipNextSync.current = false;
@@ -1040,145 +1004,6 @@ export function GameProvider({
     if (changed) playSound("toggle");
   }, []);
 
-  const applyVoteFactionEffects = (
-    events: ReturnType<typeof createEmptyFactionCycleEvents>,
-    choice: SummitVoteChoice,
-    ceiling: boolean
-  ) => {
-    if (choice === "abstain") return events;
-    if (ceiling) {
-      if (choice === "yes") {
-        return { ...events, votedYesEmissionLimits: true, votedNoEmissionLimits: false };
-      }
-      return { ...events, votedNoEmissionLimits: true, votedYesEmissionLimits: false };
-    }
-    if (choice === "yes") {
-      return { ...events, votedYesEmissionLimits: true, votedNoEmissionLimits: false };
-    }
-    return { ...events, votedNoEmissionLimits: true, votedYesEmissionLimits: false };
-  };
-
-  const castSummitVote = useCallback((countryId: CountryId, choice: SummitVoteChoice) => {
-    if (multiplayer && countryId !== multiplayer.assignedCountry) return;
-
-    let voted = false;
-    setGameState((prev) => {
-      const pending = prev.pendingSummitVote;
-      if (!pending) return prev;
-
-      const votes = { ...pending.votes, [countryId]: choice };
-      voted = true;
-      return { ...prev, pendingSummitVote: { ...pending, votes } };
-    });
-    if (voted) playSound("vote-cast");
-  }, [multiplayer]);
-
-  const autoVoteSummitBots = useCallback(() => {
-    if (multiplayer && !multiplayer.isHost) return;
-
-    setGameState((prev) => {
-      const pending = prev.pendingSummitVote;
-      if (!pending) return prev;
-
-      const votes = { ...pending.votes };
-      const allCountries = Object.keys(COUNTRY_CONFIGS) as CountryId[];
-      for (const id of allCountries) {
-        if (votes[id]) continue;
-        votes[id] = computeBotVote(id, pending, prev.regions);
-      }
-      return { ...prev, pendingSummitVote: { ...pending, votes } };
-    });
-  }, [multiplayer]);
-
-  const finalizeSummitVote = useCallback(() => {
-    if (multiplayer && !multiplayer.isHost) return;
-
-    let resolutionSound: "resolution-pass" | "resolution-fail" | null = null;
-
-    setGameState((prev) => {
-      const pending = prev.pendingSummitVote;
-      if (!pending) return prev;
-
-      const allCountries = Object.keys(COUNTRY_CONFIGS) as CountryId[];
-      const votes: Partial<Record<CountryId, SummitVoteChoice>> = { ...pending.votes };
-      for (const id of allCountries) {
-        if (!votes[id]) votes[id] = "abstain";
-      }
-
-      const { passed } = tallySummitVote(votes);
-      resolutionSound = passed ? "resolution-pass" : "resolution-fail";
-      const resolution = activateResolution(
-        { ...pending, votes },
-        passed,
-        prev.regions,
-        pending.cycle
-      );
-
-      let regions = prev.regions;
-      let relationEvents = [...prev.relationEvents];
-      let relationAlerts = [...prev.relationAlerts];
-      let factionCycleEvents = { ...prev.factionCycleEvents };
-
-      const voteRecord = {
-        cycle: pending.cycle,
-        resolution: pending.resolutionText,
-        boundaryType: pending.boundaryType,
-        passed,
-        votes,
-      };
-
-      const summitRel = applyAllSummitVoteRelations(
-        regions,
-        votes,
-        voteRecord,
-        pending.cycle,
-        relationEvents,
-        relationAlerts
-      );
-      regions = summitRel.regions;
-      relationEvents = summitRel.relationEvents;
-      relationAlerts = summitRel.relationAlerts;
-
-      for (const voter of allCountries) {
-        const choice = votes[voter]!;
-        const ceiling = isCeilingResolution(pending.boundaryType);
-        const prevEvents = factionCycleEvents[voter] ?? createEmptyFactionCycleEvents();
-        factionCycleEvents = {
-          ...factionCycleEvents,
-          [voter]: applyVoteFactionEffects(prevEvents, choice, ceiling),
-        };
-      }
-
-      let tradeRestrictionSuspensionUntil = prev.tradeRestrictionSuspensionUntil;
-      if (
-        passed &&
-        resolution.tradeRestrictionsSuspendedUntil &&
-        resolution.tradeRestrictionsSuspendedUntil > tradeRestrictionSuspensionUntil
-      ) {
-        tradeRestrictionSuspensionUntil = resolution.tradeRestrictionsSuspendedUntil;
-      }
-
-      const activeSummitResolutions = replaceSupersededResolutions(
-        prev.activeSummitResolutions,
-        resolution
-      );
-
-      return {
-        ...prev,
-        pendingSummitVote: null,
-        regions,
-        relationEvents,
-        relationAlerts,
-        factionCycleEvents,
-        summitVotes: [...prev.summitVotes, voteRecord],
-        summitHistory: [...prev.summitHistory, resolution],
-        activeSummitResolutions,
-        tradeRestrictionSuspensionUntil,
-      };
-    });
-    if (resolutionSound) playSound(resolutionSound);
-  }, [multiplayer]);
-
   const highlightFacilityRoutes = useCallback((countryId: CountryId) => {
     setGameState((prev) => {
       const routeIds = prev.transportRoutes
@@ -1238,9 +1063,6 @@ export function GameProvider({
         advanceCycle,
         setCarbonTax,
         setCarbonTaxRecycling,
-        castSummitVote,
-        autoVoteSummitBots,
-        finalizeSummitVote,
         respondTransitRequest,
         cancelTransit,
         cancelTrade,

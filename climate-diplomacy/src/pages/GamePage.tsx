@@ -15,6 +15,8 @@ import {
   syncGameState,
   updateCycleTimer,
   updateHumanPlayerMeta,
+  cancelPendingGameStateSync,
+  cacheRemoteGameState,
 } from "../services/gameService";
 import {
   clearArchiveTimer,
@@ -57,10 +59,13 @@ export function GamePage() {
   }, [roomId]);
 
   useEffect(() => {
-    if (gameData?.stateVersion != null) {
+    if (!roomId || !gameData) return;
+    cancelPendingGameStateSync();
+    if (gameData.stateVersion != null) {
       setStateVersionBaseline(gameData.stateVersion);
     }
-  }, [gameData?.stateVersion]);
+    cacheRemoteGameState(roomId, gameData.gameState);
+  }, [roomId, gameData?.stateVersion, gameData?.gameState]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -133,11 +138,10 @@ export function GamePage() {
   const handleStateSync = useCallback(
     (state: import("../types/game").GameState) => {
       if (!roomId) return;
-      const summitActive = !!state.pendingSummitVote;
-      if (isHost || summitActive) {
-        void pushGameStateImmediate(roomId, state);
+      if (isHost) {
+        void pushGameStateImmediate(roomId, state, true);
       } else {
-        syncGameState(roomId, state);
+        syncGameState(roomId, state, false);
       }
     },
     [roomId, isHost]

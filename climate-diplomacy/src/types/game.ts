@@ -325,8 +325,6 @@ export interface RelationAlert {
   message: string;
 }
 
-export type SummitVoteChoice = "yes" | "no" | "abstain";
-
 export type SummitBoundaryType =
   | "temperature"
   | "co2_concentration"
@@ -337,19 +335,20 @@ export type SummitBoundaryType =
 export interface SummitResolution {
   id: string;
   cycle: number;
+  passedAtCycle: number;
   boundaryType: SummitBoundaryType;
   resolutionText: string;
   threshold: number;
-  reductionPercent?: number;
-  severityLevel?: number;
+  reductionPercent: number | null;
+  severityLevel: number;
   targetCountries: CountryId[];
-  votes: Partial<Record<CountryId, SummitVoteChoice>>;
+  compliance: Record<CountryId, boolean>;
   passed: boolean;
-  baselineCo2?: Partial<Record<CountryId, number>>;
-  complianceDeadline?: number;
-  carbonTaxCeilingAtPassage?: Partial<Record<CountryId, number>>;
-  tradeRestrictionsSuspendedUntil?: number;
-  expiresOnSafe?: boolean;
+  baselineCo2: Partial<Record<CountryId, number>>;
+  complianceDeadline: number | null;
+  carbonTaxCeilingAtPassage: Partial<Record<CountryId, number>>;
+  tradeRestrictionsSuspendedUntil: number | null;
+  expiresOnSafe: boolean;
   active: boolean;
 }
 
@@ -358,18 +357,6 @@ export interface ComplianceResult {
   resolutionId: string;
   compliant: boolean;
   reason: string;
-}
-
-export interface PendingSummitVote {
-  cycle: number;
-  boundaryType: SummitBoundaryType;
-  resolutionText: string;
-  threshold: number;
-  reductionPercent?: number;
-  severityLevel?: number;
-  targetCountries: CountryId[] | "all";
-  votes: Partial<Record<CountryId, SummitVoteChoice>>;
-  deadlineAt: number;
 }
 
 export interface CycleTradeOffer {
@@ -388,6 +375,9 @@ export interface CycleCompletedTransfer {
   cycle: number;
 }
 
+export type SummitVoteChoice = "yes" | "no" | "abstain";
+
+/** Historical vote records for cooperation scoring (legacy saves). */
 export interface SummitVoteRecord {
   cycle: number;
   resolution: string;
@@ -435,8 +425,6 @@ export interface GameState {
   activeSummitResolutions: SummitResolution[];
   /** All resolutions (passed and failed) for dashboard history. */
   summitHistory: SummitResolution[];
-  /** Pending vote awaiting player input (boundary breach this cycle). */
-  pendingSummitVote: PendingSummitVote | null;
   /** Latest per-country compliance results from last cycle check. */
   summitComplianceResults: ComplianceResult[];
   /** Non-compliance alert messages for UI. */

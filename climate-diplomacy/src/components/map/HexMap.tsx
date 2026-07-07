@@ -12,7 +12,6 @@ import { tileKey } from "../../types/game";
 import { ResourcesBar } from "../ui/ResourcesBar";
 import { ActionPanel } from "../ui/ActionPanel";
 import { DashboardModal } from "../ui/DashboardModal";
-import { SummitVoteModal } from "../ui/SummitVoteModal";
 import { ComparisonDashboard } from "../ui/ComparisonDashboard";
 import { BuildPanel } from "../ui/BuildPanel";
 import { RelationAlerts } from "../ui/RelationAlerts";
@@ -26,7 +25,10 @@ interface HexMapProps {
   multiplayerMode?: boolean;
 }
 
-export function HexMap({ hexes, multiplayerMode = false }: HexMapProps) {
+export function HexMap({
+  hexes,
+  multiplayerMode = false,
+}: HexMapProps) {
   const {
     gameState,
     selectedHex,
@@ -181,7 +183,6 @@ export function HexMap({ hexes, multiplayerMode = false }: HexMapProps) {
       <AudioController />
       <RelationAlerts />
       <DashboardModal />
-      <SummitVoteModal />
       <ComparisonDashboard />
       <BuildPanel />
 

@@ -75,12 +75,6 @@ export function ActionPanel() {
               type="button"
               className="overlay-btn"
               onClick={advanceCycle}
-              disabled={!!gameState.pendingSummitVote}
-              title={
-                gameState.pendingSummitVote
-                  ? "Complete the summit vote before advancing"
-                  : undefined
-              }
             >
               Advance Cycle ({gameState.cycle})
             </button>

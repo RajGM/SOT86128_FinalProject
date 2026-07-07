@@ -88,7 +88,7 @@ export function getCarbonTaxCeiling(state: GameState, countryId: CountryId): num
   for (const r of state.activeSummitResolutions) {
     if (!r.active || !r.passed || r.boundaryType !== "political_stability") continue;
     if (r.severityLevel && r.severityLevel >= 2) continue;
-    const ceiling = r.carbonTaxCeilingAtPassage?.[countryId];
+    const ceiling = r.carbonTaxCeilingAtPassage[countryId];
     if (ceiling !== undefined) return ceiling;
   }
   return null;

@@ -8,7 +8,6 @@ import { DEFAULT_ROOM_SETTINGS } from "../src/lib/roomPresets";
 import {
   BOT_STRATEGY_BY_COUNTRY,
   STRATEGY_WEIGHTS,
-  computeBotVote,
   estimateFactionDeltaFromBuild,
   foodCyclesUntilEmpty,
   resolveBotCountries,
@@ -16,7 +15,6 @@ import {
   scoreDelta,
   scoreState,
 } from "../src/lib/botAI";
-import { createPendingVote } from "../src/lib/summitMechanics";
 import type { CountryId } from "../src/types/hex";
 import { COUNTRY_CONFIGS } from "../src/types/hex";
 import type { RegionState } from "../src/types/game";
@@ -107,35 +105,6 @@ check(
 check(
   "Fossil builds score higher for OPEC than green builds",
   estimateFactionDeltaFromBuild("opec", "fossil_plant") > estimateFactionDeltaFromBuild("opec", "green_plant")
-);
-
-// --- Summit votes ---
-const taxCeilingVote = createPendingVote(
-  {
-    boundaryType: "temperature",
-    severityLevel: 1,
-    threshold: 20,
-    resolutionText: "All countries must set carbon tax ≥ 20",
-    targetCountries: "all",
-  },
-  5
-);
-check("OPEC votes NO on tax ceiling", computeBotVote("opec", taxCeilingVote, state.regions) === "no");
-check("EU votes YES on tax ceiling", computeBotVote("eu", taxCeilingVote, state.regions) === "yes");
-
-const aidVote = createPendingVote(
-  {
-    boundaryType: "inequality",
-    severityLevel: 1,
-    threshold: 10,
-    resolutionText: "Wealthy contribute to poor",
-    targetCountries: "all",
-  },
-  8
-);
-check(
-  "India votes YES on inequality aid",
-  computeBotVote("india", aidVote, state.regions) === "yes"
 );
 
 // --- Bot country resolution ---

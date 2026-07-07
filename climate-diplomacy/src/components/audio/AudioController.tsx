@@ -8,12 +8,18 @@ import type { RegionState } from "../../types/game";
 const TEMP_MILESTONES = [1.5, 2.0, 2.5, 3.0];
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
+function hasActiveSummitResolutions(
+  activeSummitResolutions: { active: boolean; passed: boolean }[]
+): boolean {
+  return activeSummitResolutions.some((r) => r.active && r.passed);
+}
+
 function selectGameMusic(
-  pendingSummit: boolean,
+  summitActive: boolean,
   regions: Record<CountryId, RegionState>
 ): "ambient-main" | "ambient-tension" | "ambient-summit" | null {
   if (!isMusicEnabled()) return null;
-  if (pendingSummit) return "ambient-summit";
+  if (summitActive) return "ambient-summit";
   if (anyCountryInCrisis(regions)) return "ambient-tension";
   return "ambient-main";
 }
@@ -23,10 +29,10 @@ function anyCountryInCrisis(regions: Record<CountryId, RegionState>): boolean {
 }
 
 function applyGameMusic(
-  pendingSummit: boolean,
+  summitActive: boolean,
   regions: Record<CountryId, RegionState>
 ): void {
-  const track = selectGameMusic(pendingSummit, regions);
+  const track = selectGameMusic(summitActive, regions);
   const audio = AudioManager.getInstance();
   if (!track) {
     audio.stopMusic();
@@ -67,26 +73,29 @@ export function AudioController() {
     dashboardTab,
   } = useGame();
 
+  const summitActive = hasActiveSummitResolutions(gameState.activeSummitResolutions);
+
   const prev = useRef({
     cycle: gameState.cycle,
     dashboardOpen,
     buildPanelOpen,
     comparisonOpen,
     dashboardTab,
-    pendingSummit: gameState.pendingSummitVote?.cycle ?? null,
+    activeSummitCount: gameState.activeSummitResolutions.filter((r) => r.active && r.passed)
+      .length,
     globalTemp: gameState.globalTemperature,
     crisisCountries: new Set<string>(),
     resourceWarnKeys: new Set<string>(),
   });
 
   useEffect(() => {
-    applyGameMusic(!!gameState.pendingSummitVote, gameState.regions);
-  }, [gameState.cycle, gameState.pendingSummitVote, gameState.regions]);
+    applyGameMusic(summitActive, gameState.regions);
+  }, [gameState.cycle, summitActive, gameState.regions]);
 
   useEffect(() => {
     const start = () => {
       AudioManager.getInstance().unlockFromGesture("game");
-      applyGameMusic(!!gameState.pendingSummitVote, gameState.regions);
+      applyGameMusic(summitActive, gameState.regions);
     };
     window.addEventListener("pointerdown", start, { once: true, capture: true });
     window.addEventListener("keydown", start, { once: true, capture: true });
@@ -94,7 +103,7 @@ export function AudioController() {
       window.removeEventListener("pointerdown", start, true);
       window.removeEventListener("keydown", start, true);
     };
-  }, [gameState.pendingSummitVote, gameState.regions]);
+  }, [summitActive, gameState.regions]);
 
   useEffect(() => {
     const p = prev.current;
@@ -119,12 +128,13 @@ export function AudioController() {
   }, [gameState.cycle]);
 
   useEffect(() => {
-    const pendingCycle = gameState.pendingSummitVote?.cycle ?? null;
-    if (pendingCycle !== null && pendingCycle !== prev.current.pendingSummit) {
+    const activeCount = gameState.activeSummitResolutions.filter((r) => r.active && r.passed)
+      .length;
+    if (activeCount > prev.current.activeSummitCount) {
       playSound("summit-gavel");
     }
-    prev.current.pendingSummit = pendingCycle;
-  }, [gameState.pendingSummitVote]);
+    prev.current.activeSummitCount = activeCount;
+  }, [gameState.activeSummitResolutions]);
 
   useEffect(() => {
     const temp = gameState.globalTemperature;
@@ -139,33 +149,19 @@ export function AudioController() {
   }, [gameState.globalTemperature]);
 
   useEffect(() => {
-    for (const id of ALL_COUNTRIES) {
-      const h = gameState.regions[id].happiness;
-      const wasCrisis = prev.current.crisisCountries.has(id);
-      const isCrisis = h < 30;
-      if (isCrisis && !wasCrisis) playSound("crisis");
-      if (isCrisis) prev.current.crisisCountries.add(id);
-      else prev.current.crisisCountries.delete(id);
+    const crisisNow = new Set(
+      ALL_COUNTRIES.filter((id) => gameState.regions[id].happiness < 30)
+    );
+    const wasCrisis = prev.current.crisisCountries;
+    for (const id of crisisNow) {
+      if (!wasCrisis.has(id)) playSound("crisis");
     }
+    prev.current.crisisCountries = crisisNow;
   }, [gameState.regions]);
 
   useEffect(() => {
     checkResourceWarnings(gameState.regions, viewCountry, prev.current.resourceWarnKeys);
   }, [gameState.regions, viewCountry]);
-
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-      const btn = target.closest("button, .overlay-btn, .tab-btn, .tier-option, .build-type-row");
-      if (!btn) return;
-      if (btn.closest(".audio-settings")) return;
-      AudioManager.getInstance().unlockFromGesture("ui-click");
-      playSound("click");
-    };
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
-  }, []);
 
   return null;
 }

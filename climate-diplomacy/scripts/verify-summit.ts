@@ -5,10 +5,7 @@ import { generateMap } from "../src/lib/mapGenerator";
 import { createInitialGameState } from "../src/lib/gameState";
 import {
   checkBoundariesInOrder,
-  computeBotVote,
-  createPendingVote,
-  tallySummitVote,
-  activateResolution,
+  enactResolutionFromBreach,
   checkResolutionCompliance,
   getCarbonTaxFloor,
   isCeilingResolution,
@@ -36,7 +33,6 @@ const state = createInitialGameState(hexes);
 const ALL = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
 check("Initial state has no active resolutions", state.activeSummitResolutions.length === 0);
-check("Initial pending vote is null", state.pendingSummitVote === null);
 check("Initial tax floor is 0", getCarbonTaxFloor(state, "usa") === 0);
 
 // Boundary 1: temperature at 1.5°C
@@ -82,52 +78,22 @@ const co2Breach = checkBoundariesInOrder({
 check("Global CO₂ 250 triggers top-3 reduction", co2Breach?.boundaryType === "co2_concentration");
 check("CO₂ reduction 10% at warning", co2Breach?.reductionPercent === 10);
 
-// Vote tally
-const votes = {
-  usa: "yes" as const,
-  eu: "yes" as const,
-  china: "yes" as const,
-  india: "yes" as const,
-  latam: "yes" as const,
-  africa: "no" as const,
-  russia: "no" as const,
-  opec: "abstain" as const,
-};
-const tally = tallySummitVote(votes);
-check("5 yes vs 2 no passes", tally.passed === true, `yes=${tally.yesCount} no=${tally.noCount}`);
-
-const failVotes = {
-  usa: "yes" as const,
-  eu: "yes" as const,
-  china: "yes" as const,
-  india: "no" as const,
-  latam: "no" as const,
-  africa: "no" as const,
-  russia: "no" as const,
-  opec: "abstain" as const,
-};
-check("3 yes vs 4 no fails", tallySummitVote(failVotes).passed === false);
-
 // Bot strategies assigned
 check("OPEC is fossil maximiser", BOT_STRATEGY_BY_COUNTRY.opec === "fossil_maximiser");
 check("EU is green pioneer", BOT_STRATEGY_BY_COUNTRY.eu === "green_pioneer");
 
+// Auto-enact resolution and compliance
 if (tempBreach) {
-  const pending = createPendingVote(tempBreach, 5);
-  check("OPEC votes NO on tax ceiling", computeBotVote("opec", pending, state.regions) === "no");
-  check("EU votes YES on tax ceiling", computeBotVote("eu", pending, state.regions) === "yes");
-}
+  const resolution = enactResolutionFromBreach(tempBreach, state.regions, 5);
+  check("Resolution auto-passes", resolution.passed === true);
+  check("passedAtCycle set", resolution.passedAtCycle === 5);
+  check("compliance map initialized", ALL.every((id) => id in resolution.compliance));
 
-// Activate resolution and compliance
-if (tempBreach) {
-  const pending = createPendingVote(tempBreach, 5);
-  const allYes = Object.fromEntries(ALL.map((id) => [id, "yes" as const]));
-  const resolution = activateResolution({ ...pending, votes: allYes }, true, state.regions, 5);
   const activeState = {
     ...state,
     activeSummitResolutions: [resolution],
   };
-  check("Tax floor becomes 20 after passage", getCarbonTaxFloor(activeState, "opec") === 20);
+  check("Tax floor becomes 20 after enactment", getCarbonTaxFloor(activeState, "opec") === 20);
 
   const nonCompliant = checkResolutionCompliance(
     resolution,
@@ -143,7 +109,7 @@ if (tempBreach) {
 check("Ceiling resolutions identified", isCeilingResolution("temperature"));
 check("Floor resolutions identified", !isCeilingResolution("inequality"));
 
-// Summit metric abstain = 0.5
+// Summit metric abstain = 0.5 (legacy vote history)
 const metric = computeSummitYesPercent("usa", [
   { cycle: 1, resolution: "test", votes: { usa: "yes" } },
   { cycle: 2, resolution: "test2", votes: { usa: "abstain" } },

@@ -518,7 +518,7 @@ export function applyAllSummitVoteRelations(
 export function applySummitNonComplianceRelations(
   regions: Record<CountryId, RegionState>,
   violator: CountryId,
-  yesVoters: CountryId[],
+  compliantCountries: CountryId[],
   resolutionText: string,
   cycle: number,
   relationEvents: RelationEvent[],
@@ -527,11 +527,11 @@ export function applySummitNonComplianceRelations(
   let result: RelationUpdateResult = { regions, relationEvents, relationAlerts };
   const violatorName = COUNTRY_CONFIGS[violator].name;
 
-  for (const voter of yesVoters) {
-    if (voter === violator) continue;
+  for (const compliant of compliantCountries) {
+    if (compliant === violator) continue;
     result = applyOneSidedRelation(
       result.regions,
-      voter,
+      compliant,
       violator,
       RELATION_EVENT_DELTAS.summit_non_compliance,
       "summit_non_compliance",

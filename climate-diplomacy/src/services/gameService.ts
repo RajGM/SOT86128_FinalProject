@@ -79,9 +79,10 @@ export async function startGame(
 }
 
 function normalizeGameData(raw: GameData): GameData {
+  const gameState = hydrateGameState(raw.gameState);
   return {
     ...raw,
-    gameState: hydrateGameState(raw.gameState),
+    gameState,
   };
 }
 
@@ -91,19 +92,30 @@ export function subscribeGame(
 ): Unsubscribe {
   const db = getFirebaseDb();
   return onValue(ref(db, `games/${roomId}`), (snap) => {
-    onUpdate(snap.exists() ? normalizeGameData(snap.val() as GameData) : null);
+    if (!snap.exists()) {
+      remoteGameStateCache.delete(roomId);
+      onUpdate(null);
+      return;
+    }
+    const normalized = normalizeGameData(snap.val() as GameData);
+    remoteGameStateCache.set(roomId, normalized.gameState);
+    onUpdate(normalized);
   });
 }
 
 export async function getGame(roomId: string): Promise<GameData | null> {
   const db = getFirebaseDb();
   const snap = await get(ref(db, `games/${roomId}`));
-  return snap.exists() ? normalizeGameData(snap.val() as GameData) : null;
+  if (!snap.exists()) return null;
+  const normalized = normalizeGameData(snap.val() as GameData);
+  remoteGameStateCache.set(roomId, normalized.gameState);
+  return normalized;
 }
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 /** Highest stateVersion seen from Firebase — shared counter must not fall behind remote. */
 let knownRemoteVersion = 0;
+const remoteGameStateCache = new Map<string, GameState>();
 
 /** Keep the local write counter aligned with Firebase (call on every subscribe update). */
 export function setStateVersionBaseline(version: number): void {
@@ -112,37 +124,76 @@ export function setStateVersionBaseline(version: number): void {
   }
 }
 
+/** Cache latest Firebase gameState for merge-before-write summit protection. */
+export function cacheRemoteGameState(roomId: string, gameState: GameState): void {
+  remoteGameStateCache.set(roomId, gameState);
+}
+
+export function getCachedRemoteGameState(roomId: string): GameState | undefined {
+  return remoteGameStateCache.get(roomId);
+}
+
+/** Drop any debounced push scheduled before a newer Firebase snapshot arrived. */
+export function cancelPendingGameStateSync(): void {
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+}
+
 function bumpStateVersion(): number {
   knownRemoteVersion += 1;
   return knownRemoteVersion;
 }
 
-export function syncGameState(roomId: string, gameState: GameState): void {
+function sanitizeGameState(gameState: GameState): GameState {
+  return JSON.parse(JSON.stringify(gameState)) as GameState;
+}
+
+function buildFirebaseGameUpdate(
+  roomId: string,
+  gameState: GameState,
+  version: number,
+  _isHost: boolean
+): Record<string, unknown> {
+  const merged = sanitizeGameState(gameState);
+  return {
+    gameState: merged,
+    cycle: merged.cycle,
+    stateVersion: version,
+    lastActivity: Date.now(),
+  };
+}
+
+export function syncGameState(
+  roomId: string,
+  gameState: GameState,
+  isHost = false
+): void {
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
+    syncTimer = null;
     const version = bumpStateVersion();
     const db = getFirebaseDb();
-    void update(ref(db, `games/${roomId}`), {
-      gameState,
-      cycle: gameState.cycle,
-      stateVersion: version,
-      lastActivity: Date.now(),
-    });
+    void update(
+      ref(db, `games/${roomId}`),
+      buildFirebaseGameUpdate(roomId, gameState, version, isHost)
+    );
   }, 300);
 }
 
 export async function pushGameStateImmediate(
   roomId: string,
-  gameState: GameState
+  gameState: GameState,
+  isHost = true
 ): Promise<void> {
+  cancelPendingGameStateSync();
   const version = bumpStateVersion();
   const db = getFirebaseDb();
-  await update(ref(db, `games/${roomId}`), {
-    gameState,
-    cycle: gameState.cycle,
-    stateVersion: version,
-    lastActivity: Date.now(),
-  });
+  await update(
+    ref(db, `games/${roomId}`),
+    buildFirebaseGameUpdate(roomId, gameState, version, isHost)
+  );
 }
 
 export async function updateHumanPlayerMeta(

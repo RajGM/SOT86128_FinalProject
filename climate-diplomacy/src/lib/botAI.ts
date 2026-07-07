@@ -4,8 +4,7 @@
  * Each country archetype (fossil_maximiser, green_pioneer, pragmatic_balancer,
  * development_first) scores game state via weighted utilities. Per cycle bots
  * perform 1-step lookahead for builds/trades, adjust carbon tax on a schedule,
- * and cast summit votes by comparing estimated utility if a resolution passes
- * vs fails. Deterministic for identical game state + hex layout.
+ * and adjust carbon tax on a schedule. Deterministic for identical game state + hex layout.
  */
 import type { CountryId, HexData } from "../types/hex";
 import { COUNTRY_CONFIGS } from "../types/hex";
@@ -14,11 +13,8 @@ import type {
   BuildType,
   CarbonTaxRecycling,
   GameState,
-  PendingSummitVote,
   PlacedBuilding,
   RegionState,
-  SummitBoundaryType,
-  SummitVoteChoice,
   TradeItem,
 } from "../types/game";
 import { tileKey } from "../types/game";
@@ -31,7 +27,6 @@ import {
   getBuildTechCost,
 } from "./buildRules";
 import {
-  calculateTaxCollected,
   getCarbonTaxCeiling,
   getCarbonTaxFloor,
   resolveSubsidizedMoneyCost,
@@ -245,10 +240,6 @@ function factionAlignmentScore(countryId: CountryId, region: RegionState): numbe
   const total = profile.legacyBrown + profile.legacyGreen;
   const greenLean = total > 0 ? profile.legacyGreen / total : 0.5;
   return greenLean * region.factions.greenSatisfaction + (1 - greenLean) * region.factions.brownSatisfaction;
-}
-
-function isCeilingResolution(boundaryType: SummitBoundaryType): boolean {
-  return boundaryType === "temperature" || boundaryType === "co2_concentration";
 }
 
 /** Score a region snapshot for an archetype (higher = better for that bot). */
@@ -940,132 +931,6 @@ function tryAdjustCarbonTax(state: GameState, countryId: CountryId, force = fals
       },
     },
   };
-}
-
-function estimateTaxComplianceCost(region: RegionState, requiredTax: number): number {
-  const gap = Math.max(0, requiredTax - region.carbonTax);
-  if (gap <= 0) return 0;
-  return calculateTaxCollected(region.co2, gap);
-}
-
-function countryHasSurplus(region: RegionState, threshold: number): boolean {
-  return region.food > threshold || region.energy > threshold;
-}
-
-function isDeficitCountry(region: RegionState): boolean {
-  const drain = computePerCapitaConsumption(region.population);
-  return region.food < drain.food || region.energy < drain.energy || region.money < 10;
-}
-
-function simulateResolutionPass(
-  countryId: CountryId,
-  pending: PendingSummitVote,
-  regions: Record<CountryId, RegionState>
-): RegionState {
-  const region = regions[countryId];
-  let next = { ...region };
-
-  if (pending.boundaryType === "temperature") {
-    const newTax = Math.max(region.carbonTax, pending.threshold);
-    const extraCost = estimateTaxComplianceCost(region, newTax);
-    next = { ...next, carbonTax: newTax, money: Math.max(0, next.money - extraCost) };
-    return next;
-  }
-
-  if (pending.boundaryType === "co2_concentration") {
-    const targets =
-      pending.targetCountries === "all" ? ALL_COUNTRIES : pending.targetCountries;
-    if (targets.includes(countryId)) {
-      const pct = (pending.reductionPercent ?? pending.threshold) / 100;
-      next = { ...next, co2: Math.max(0, next.co2 * (1 - pct)) };
-    }
-    return next;
-  }
-
-  if (pending.boundaryType === "human_development") {
-    if (countryHasSurplus(region, pending.threshold)) {
-      const giveFood = Math.min(15, Math.max(5, region.food - pending.threshold));
-      next = { ...next, food: next.food - giveFood };
-    } else if (isDeficitCountry(region)) {
-      next = { ...next, food: next.food + 8, energy: next.energy + 5 };
-    }
-    return next;
-  }
-
-  if (pending.boundaryType === "inequality") {
-    if (region.money > 60) {
-      const moneyGive = pending.severityLevel && pending.severityLevel >= 2 ? 15 : 10;
-      const techGive = pending.severityLevel && pending.severityLevel >= 2 ? 8 : 5;
-      if (region.money >= moneyGive) {
-        next = { ...next, money: next.money - moneyGive };
-      } else {
-        next = { ...next, technology: Math.max(0, next.technology - techGive) };
-      }
-    } else if (region.money < 30 || region.technology < 20) {
-      next = { ...next, money: next.money + 10, technology: next.technology + 5 };
-    }
-    return next;
-  }
-
-  if (pending.boundaryType === "political_stability") {
-    if (pending.severityLevel && pending.severityLevel >= 2) {
-      if (region.happiness > 60) {
-        const crisisCount = ALL_COUNTRIES.filter((id) => regions[id].happiness < 30).length;
-        next = { ...next, money: Math.max(0, next.money - 10 * crisisCount) };
-      }
-    } else {
-      const frozen = region.carbonTax;
-      if (region.carbonTax > frozen) {
-        next = { ...next, carbonTax: frozen };
-      }
-    }
-    return next;
-  }
-
-  return next;
-}
-
-/** Utility-based summit vote: YES if passing raises archetype utility. */
-export function computeBotVote(
-  countryId: CountryId,
-  pending: PendingSummitVote,
-  regions: Record<CountryId, RegionState>
-): SummitVoteChoice {
-  const strategy = BOT_STRATEGY_BY_COUNTRY[countryId];
-  const region = regions[countryId];
-  const ceiling = isCeilingResolution(pending.boundaryType);
-
-  let utilityPass = scoreState(simulateResolutionPass(countryId, pending, regions), countryId, strategy);
-  const utilityFail = scoreState(region, countryId, strategy);
-
-  if (strategy === "green_pioneer" && ceiling) {
-    utilityPass += 1.2;
-  }
-  if (strategy === "fossil_maximiser" && ceiling) {
-    utilityPass -= 1.5;
-  }
-
-  const delta = utilityPass - utilityFail;
-
-  const voteThreshold = ceiling ? 0.15 : 0.25;
-
-  if (delta > voteThreshold) return "yes";
-  if (delta < -voteThreshold) return "no";
-
-  // Tie-breakers preserve recognizable archetype behaviour
-  if (strategy === "green_pioneer") return delta >= 0 ? "yes" : "abstain";
-  if (strategy === "fossil_maximiser") {
-    if (ceiling) return "no";
-    if (pending.boundaryType === "inequality" || pending.boundaryType === "human_development") {
-      return countryHasSurplus(region, pending.threshold) ? "no" : "yes";
-    }
-    return "no";
-  }
-  if (strategy === "development_first") {
-    if (pending.boundaryType === "inequality" || pending.boundaryType === "human_development") return "yes";
-    return region.happiness < 50 ? "yes" : "abstain";
-  }
-  return "abstain";
 }
 
 /** Run build + trade + tax adjust per bot country before cycle processing. */

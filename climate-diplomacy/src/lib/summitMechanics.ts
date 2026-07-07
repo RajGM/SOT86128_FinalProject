@@ -4,23 +4,23 @@ import type {
   ComplianceResult,
   CycleTradeOffer,
   GameState,
-  PendingSummitVote,
   RegionState,
   SummitBoundaryType,
   SummitResolution,
-  SummitVoteChoice,
   TradeItem,
 } from "../types/game";
 import { computeAllCountryComparisons, DEVELOPING_RECIPIENTS, getStartingMoney } from "./comparisonMetrics";
-import { computeBotVote, BOT_STRATEGY_BY_COUNTRY, type BotStrategy } from "./botAI";
+import { BOT_STRATEGY_BY_COUNTRY, type BotStrategy } from "./botAI";
 
-export { computeBotVote, BOT_STRATEGY_BY_COUNTRY, type BotStrategy };
+export { BOT_STRATEGY_BY_COUNTRY, type BotStrategy };
 export { getCarbonTaxFloor, getCarbonTaxCeiling } from "./carbonTaxMechanics";
 import { computePerCapitaConsumption } from "./populationMechanics";
 
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
-export const SUMMIT_VOTE_DURATION_MS = 30_000;
+export function emptyCompliance(): Record<CountryId, boolean> {
+  return Object.fromEntries(ALL_COUNTRIES.map((id) => [id, true])) as Record<CountryId, boolean>;
+}
 
 export interface BoundaryBreachResult {
   boundaryType: SummitBoundaryType;
@@ -231,7 +231,6 @@ export function checkBoundariesInOrder(ctx: {
     climateFinanceThisCycle: {},
     activeSummitResolutions: [],
     summitHistory: [],
-    pendingSummitVote: null,
     summitComplianceResults: [],
     summitComplianceAlerts: [],
     peakGlobalPopulation,
@@ -298,89 +297,51 @@ export function checkBoundariesInOrder(ctx: {
   return null;
 }
 
-export function createPendingVote(
+export function enactResolutionFromBreach(
   breach: BoundaryBreachResult,
-  cycle: number
-): PendingSummitVote {
-  return {
-    cycle,
-    boundaryType: breach.boundaryType,
-    resolutionText: breach.resolutionText,
-    threshold: breach.threshold,
-    reductionPercent: breach.reductionPercent,
-    severityLevel: breach.severityLevel,
-    targetCountries: breach.targetCountries,
-    votes: {},
-    deadlineAt: Date.now() + SUMMIT_VOTE_DURATION_MS,
-  };
-}
-
-export function tallySummitVote(
-  votes: Partial<Record<CountryId, SummitVoteChoice>>
-): { passed: boolean; yesCount: number; noCount: number; abstainCount: number } {
-  let yesCount = 0;
-  let noCount = 0;
-  let abstainCount = 0;
-  for (const id of ALL_COUNTRIES) {
-    const v = votes[id] ?? "abstain";
-    if (v === "yes") yesCount++;
-    else if (v === "no") noCount++;
-    else abstainCount++;
-  }
-  const nonAbstain = yesCount + noCount;
-  const requiredYes = nonAbstain > 0 ? Math.floor(nonAbstain / 2) + 1 : 5;
-  const passed = yesCount > noCount && yesCount >= requiredYes;
-  return { passed, yesCount, noCount, abstainCount };
-}
-
-export function activateResolution(
-  pending: PendingSummitVote,
-  passed: boolean,
   regions: Record<CountryId, RegionState>,
   cycle: number
 ): SummitResolution {
-  const id = `summit-${cycle}-${pending.boundaryType}-${Date.now()}`;
-  const baselineCo2: Partial<Record<CountryId, number>> = {};
-  let targets: CountryId[] =
-    pending.targetCountries === "all" ? [...ALL_COUNTRIES] : [...pending.targetCountries];
+  const id = `summit-${cycle}-${breach.boundaryType}-${Date.now()}`;
+  const targets: CountryId[] =
+    breach.targetCountries === "all" ? [...ALL_COUNTRIES] : [...breach.targetCountries];
 
-  if (pending.boundaryType === "co2_concentration") {
+  const baselineCo2: Partial<Record<CountryId, number>> = {};
+  if (breach.boundaryType === "co2_concentration") {
     for (const t of targets) {
       baselineCo2[t] = regions[t].co2;
     }
   }
 
   const carbonTaxCeilingAtPassage: Partial<Record<CountryId, number>> = {};
-  if (pending.boundaryType === "political_stability" && pending.severityLevel === 1) {
-    for (const id of ALL_COUNTRIES) {
-      carbonTaxCeilingAtPassage[id] = regions[id].carbonTax;
+  if (breach.boundaryType === "political_stability" && breach.severityLevel === 1) {
+    for (const countryId of ALL_COUNTRIES) {
+      carbonTaxCeilingAtPassage[countryId] = regions[countryId].carbonTax;
     }
   }
 
   return {
     id,
     cycle,
-    boundaryType: pending.boundaryType,
-    resolutionText: pending.resolutionText,
-    threshold: pending.threshold,
-    reductionPercent: pending.reductionPercent,
-    severityLevel: pending.severityLevel,
+    passedAtCycle: cycle,
+    boundaryType: breach.boundaryType,
+    resolutionText: breach.resolutionText,
+    threshold: breach.threshold,
+    reductionPercent: breach.reductionPercent ?? null,
+    severityLevel: breach.severityLevel,
     targetCountries: targets,
-    votes: { ...pending.votes },
-    passed,
-    baselineCo2: Object.keys(baselineCo2).length > 0 ? baselineCo2 : undefined,
+    compliance: emptyCompliance(),
+    passed: true,
+    baselineCo2,
     complianceDeadline:
-      pending.boundaryType === "co2_concentration" ? cycle + 3 : undefined,
-    carbonTaxCeilingAtPassage:
-      Object.keys(carbonTaxCeilingAtPassage).length > 0
-        ? carbonTaxCeilingAtPassage
-        : undefined,
+      breach.boundaryType === "co2_concentration" ? cycle + 3 : null,
+    carbonTaxCeilingAtPassage,
     tradeRestrictionsSuspendedUntil:
-      pending.boundaryType === "political_stability" ? cycle + 3 : undefined,
+      breach.boundaryType === "political_stability" ? cycle + 3 : null,
     expiresOnSafe:
-      pending.boundaryType === "human_development" ||
-      pending.boundaryType === "inequality",
-    active: passed,
+      breach.boundaryType === "human_development" ||
+      breach.boundaryType === "inequality",
+    active: true,
   };
 }
 
@@ -497,7 +458,7 @@ export function checkResolutionCompliance(
   }
 
   if (resolution.boundaryType === "co2_concentration") {
-    const baseline = resolution.baselineCo2?.[countryId];
+    const baseline = resolution.baselineCo2[countryId];
     if (baseline === undefined) {
       return {
         countryId,
@@ -509,7 +470,8 @@ export function checkResolutionCompliance(
     const pct = (resolution.reductionPercent ?? resolution.threshold) / 100;
     const maxAllowed = baseline * (1 - pct);
     const compliant = region.co2 <= maxAllowed;
-    const pastDeadline = resolution.complianceDeadline !== undefined && cycle > resolution.complianceDeadline;
+    const pastDeadline =
+      resolution.complianceDeadline !== null && cycle > resolution.complianceDeadline;
     if (pastDeadline) {
       return {
         countryId,
@@ -610,7 +572,7 @@ export function checkResolutionCompliance(
           : `Missing 10 money contribution to crisis country`,
       };
     }
-    const ceiling = resolution.carbonTaxCeilingAtPassage?.[countryId];
+    const ceiling = resolution.carbonTaxCeilingAtPassage[countryId];
     if (ceiling !== undefined && region.carbonTax > ceiling) {
       return {
         countryId,
@@ -647,12 +609,12 @@ export function shouldExpireResolution(
   if (!resolution.active) return false;
 
   if (resolution.boundaryType === "co2_concentration") {
-    return resolution.complianceDeadline !== undefined && cycle > resolution.complianceDeadline;
+    return resolution.complianceDeadline !== null && cycle > resolution.complianceDeadline;
   }
 
   if (resolution.boundaryType === "political_stability") {
     return (
-      resolution.tradeRestrictionsSuspendedUntil !== undefined &&
+      resolution.tradeRestrictionsSuspendedUntil !== null &&
       cycle > resolution.tradeRestrictionsSuspendedUntil
     );
   }
@@ -684,8 +646,8 @@ export function isTradeRestrictionSuspended(state: GameState, cycle: number): bo
   return state.tradeRestrictionSuspensionUntil > cycle;
 }
 
-export function getYesVoters(resolution: SummitResolution): CountryId[] {
-  return ALL_COUNTRIES.filter((id) => resolution.votes[id] === "yes");
+export function getCompliantCountries(resolution: SummitResolution): CountryId[] {
+  return ALL_COUNTRIES.filter((id) => resolution.compliance[id]);
 }
 
 export function humanDevelopmentStillBreached(

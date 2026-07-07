@@ -399,52 +399,59 @@ function buildRelations(countryId: CountryId): Partial<Record<CountryId, number>
   return relations;
 }
 
+function defaultCompliance(): Record<CountryId, boolean> {
+  return Object.fromEntries(ALL_COUNTRIES.map((id) => [id, true])) as Record<CountryId, boolean>;
+}
+
 function createSummitResolutions(): SummitResolution[] {
   return [
     {
       id: "res-1",
       cycle: 12,
+      passedAtCycle: 12,
       boundaryType: "temperature",
       resolutionText: "All countries must set carbon tax ≥ 20",
       threshold: 20,
+      reductionPercent: null,
       severityLevel: 1,
       targetCountries: [...ALL_COUNTRIES],
-      votes: {
-        usa: "no",
-        eu: "yes",
-        russia: "no",
-        china: "abstain",
-        india: "yes",
-        opec: "no",
-        latam: "yes",
-        africa: "yes",
+      compliance: {
+        ...defaultCompliance(),
+        usa: false,
+        russia: false,
+        opec: false,
       },
       passed: true,
+      baselineCo2: {},
+      complianceDeadline: null,
+      carbonTaxCeilingAtPassage: {},
+      tradeRestrictionsSuspendedUntil: null,
+      expiresOnSafe: false,
       active: true,
     },
     {
       id: "res-2",
       cycle: 14,
+      passedAtCycle: 14,
       boundaryType: "inequality",
       resolutionText:
         "Countries with money > 60 must contribute 15 money OR 8 technology to countries with money < 30 or tech < 20. Contributions count toward climate finance.",
       threshold: 15,
+      reductionPercent: null,
       severityLevel: 2,
       targetCountries: [...ALL_COUNTRIES],
-      votes: {
-        usa: "no",
-        eu: "yes",
-        russia: "abstain",
-        china: "no",
-        india: "yes",
-        opec: "abstain",
-        latam: "yes",
-        africa: "yes",
+      compliance: {
+        ...defaultCompliance(),
+        usa: false,
+        china: false,
       },
       passed: true,
-      active: true,
+      baselineCo2: {},
       complianceDeadline: 16,
+      carbonTaxCeilingAtPassage: {},
+      tradeRestrictionsSuspendedUntil: null,
       expiresOnSafe: true,
+      active: true,
     },
   ];
 }
@@ -661,7 +668,6 @@ export function createTestScenarioState(hexes: HexData[]): GameState {
     summitVotes,
     activeSummitResolutions,
     summitHistory,
-    pendingSummitVote: null,
     summitComplianceResults: [],
     summitComplianceAlerts: [],
     peakGlobalPopulation,
