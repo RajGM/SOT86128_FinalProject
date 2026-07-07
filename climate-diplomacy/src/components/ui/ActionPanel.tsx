@@ -1,4 +1,5 @@
 import { useGame } from "../../context/GameContext";
+import { canPlayerBuildOnHex } from "../../lib/buildRules";
 import "./overlay.css";
 
 export function ActionPanel() {
@@ -11,11 +12,18 @@ export function ActionPanel() {
     buildPanelOpen,
     setBuildPanelOpen,
     selectedHex,
+    playerBuildCountry,
     advanceCycle,
   } = useGame();
 
   const showAdvance =
     gameState.testingMode || (multiplayer?.isHost && !gameState.testingMode);
+
+  const showBuildButton = canPlayerBuildOnHex(
+    selectedHex,
+    gameState.testingMode,
+    playerBuildCountry
+  );
 
   return (
     <div className="action-panel">
@@ -30,7 +38,7 @@ export function ActionPanel() {
       >
         Actions — Technology / Diplomacy / Trade / Routes / Summit
       </button>
-      {selectedHex && (
+      {showBuildButton && (
         <button
           className={`overlay-btn primary ${buildPanelOpen ? "active" : ""}`}
           onClick={() => setBuildPanelOpen(!buildPanelOpen)}

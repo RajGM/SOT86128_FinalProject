@@ -15,6 +15,9 @@ import {
   FARM_AGRICULTURAL_PLACEMENT_MESSAGE,
   TRANSPORT_HUB_T2_COASTAL_MESSAGE,
   TRANSPORT_HUB_LAND_MESSAGE,
+  OWN_TERRITORY_MESSAGE,
+  canBuildInTerritory,
+  canPlayerBuildOnHex,
 } from "../../lib/buildRules";
 import { createHexLookup } from "../../lib/hexUtils";
 import { formatRoutePath } from "../../lib/routeDetection";
@@ -41,6 +44,7 @@ export function BuildPanel() {
     setBuildPanelOpen,
     gameState,
     viewCountry,
+    playerBuildCountry,
     placeBuild,
     demolishBuild,
     upgradeBuild,
@@ -56,18 +60,22 @@ export function BuildPanel() {
 
   const hexLookup = useMemo(() => createHexLookup(hexes), [hexes]);
 
+  const regionId = gameState.testingMode
+    ? (selectedHex?.countryId ?? viewCountry)
+    : playerBuildCountry;
+
   const available = useMemo(() => {
     if (!selectedHex) return [];
-    const regionId = selectedHex.countryId ?? (gameState.testingMode ? viewCountry : "usa");
     const regionTech = gameState.regions[regionId].technology;
     return getAvailableBuildsForTile(
       selectedHex,
       gameState.tileBuildings,
       gameState.testingMode,
       hexLookup,
-      regionTech
+      regionTech,
+      gameState.testingMode ? undefined : playerBuildCountry
     );
-  }, [selectedHex, gameState.tileBuildings, gameState.testingMode, gameState.regions, viewCountry, hexLookup]);
+  }, [selectedHex, gameState.tileBuildings, gameState.testingMode, gameState.regions, playerBuildCountry, hexLookup, regionId, viewCountry]);
 
   const buildsByType = useMemo(() => {
     const map = new Map<
@@ -102,10 +110,20 @@ export function BuildPanel() {
 
   if (!buildPanelOpen || !selectedHex) return null;
 
+  if (!canPlayerBuildOnHex(selectedHex, gameState.testingMode, playerBuildCountry)) {
+    return null;
+  }
+
   const tags = hexToTileTags(selectedHex);
   const existing = gameState.tileBuildings[`${selectedHex.q},${selectedHex.r}`];
-  const regionId = selectedHex.countryId ?? (gameState.testingMode ? viewCountry : "usa");
   const region = gameState.regions[regionId];
+  const territoryCheck = canBuildInTerritory(
+    selectedHex,
+    gameState.testingMode ? undefined : playerBuildCountry,
+    gameState.testingMode
+  );
+  const territoryBlocked = !territoryCheck.available;
+  const canManageTerritory = !territoryBlocked;
 
   const existingDef = existing ? getBuildDefinition(existing.type) : null;
   const demolishBreakdown = existingDef
@@ -117,8 +135,8 @@ export function BuildPanel() {
   const upgradeTechCost = existingDef && existing && canUpgradeTier(existing.tier)
     ? getUpgradeTechCost(existingDef, existing.tier)
     : 0;
-  const canUpgrade = upgradeCost !== null && region.money >= upgradeCost && region.technology >= upgradeTechCost;
-  const canDemolish = demolishBreakdown !== null && region.money >= demolishBreakdown.demolitionFee;
+  const canUpgrade = canManageTerritory && upgradeCost !== null && region.money >= upgradeCost && region.technology >= upgradeTechCost;
+  const canDemolish = canManageTerritory && demolishBreakdown !== null && region.money >= demolishBreakdown.demolitionFee;
   const nextTier = existing && canUpgradeTier(existing.tier) ? ((existing.tier + 1) as 2 | 3) : null;
 
   const isTransport = existing?.type === "transport_hub";
@@ -163,13 +181,11 @@ export function BuildPanel() {
     selectedPlacement !== null &&
     selectedPlacement !== undefined &&
     !selectedPlacement.available &&
-    (selectedBuildType === "transport_hub" ||
-      selectedBuildType === "extractor" ||
-      selectedBuildType === "farm" ||
-      selectedBuildType === "green_plant");
+    !!selectedPlacement.reason;
   const happinessCascade = getHappinessCascade(region.happiness);
   const constructionBlocked = isConstructionBlocked(region.happiness);
   const canPlaceBuild =
+    !territoryBlocked &&
     selectedBuildType !== null &&
     selectedTier !== null &&
     region.money >= placeCost &&
@@ -221,6 +237,11 @@ export function BuildPanel() {
             {constructionBlocked && (
               <div style={{ marginTop: 6, fontSize: 11, color: "#ef4444" }}>
                 Collapse: new construction blocked until happiness recovers above 15%.
+              </div>
+            )}
+            {territoryBlocked && (
+              <div style={{ marginTop: 6, fontSize: 11, color: "#ef4444" }}>
+                {territoryCheck.reason ?? OWN_TERRITORY_MESSAGE}
               </div>
             )}
           </div>
@@ -550,7 +571,7 @@ export function BuildPanel() {
             <button
               type="button"
               className="overlay-btn primary"
-              disabled={region.money < postTier3Cost}
+              disabled={!canManageTerritory || region.money < postTier3Cost}
               onClick={() => {
                 postTier3Upgrade();
                 setManageAction(null);

@@ -1,4 +1,4 @@
-import type { HexData } from "../types/hex";
+import type { CountryId, HexData } from "../types/hex";
 import type { BuildDefinition, BuildEffects, BuildTierCost, BuildType, PlacedBuilding } from "../types/game";
 import { BUILD_BY_ID, BUILD_DEFINITIONS } from "../config/builds";
 import { createHexLookup, getHexNeighborCoords } from "./hexUtils";
@@ -20,6 +20,30 @@ export const GREEN_TECH_REQUIREMENT_MESSAGE =
 
 export const EXTRACTOR_DEPOSIT_PLACEMENT_MESSAGE =
   "Can only be built on tiles with resource deposits";
+
+export const OWN_TERRITORY_MESSAGE = "Can only build in your own territory";
+
+export function canBuildInTerritory(
+  hex: HexData,
+  playerCountry: CountryId | undefined,
+  testingMode: boolean
+): BuildAvailability {
+  if (testingMode) return { available: true };
+  if (!playerCountry || hex.countryId !== playerCountry) {
+    return { available: false, reason: OWN_TERRITORY_MESSAGE };
+  }
+  return { available: true };
+}
+
+/** Whether the player may open build UI / place builds on this hex. */
+export function canPlayerBuildOnHex(
+  hex: HexData | null,
+  testingMode: boolean,
+  playerCountry: CountryId | undefined
+): boolean {
+  if (!hex) return false;
+  return canBuildInTerritory(hex, playerCountry, testingMode).available;
+}
 
 const DEFAULT_DEMOLISH_COST_RATIO = 0.25;
 const DEFAULT_DEMOLISH_REFUND_RATIO = 0.35;
@@ -149,12 +173,16 @@ export function canBuildOnTile(
   tier: 1 | 2 | 3,
   testingMode = false,
   hexLookup?: Map<string, HexData>,
-  regionTech = 0
+  regionTech = 0,
+  playerCountry?: CountryId
 ): BuildAvailability {
   const key = `${hex.q},${hex.r}`;
   if (existingBuildings[key]) {
     return { available: false, reason: "Tile already has a building" };
   }
+
+  const territoryCheck = canBuildInTerritory(hex, playerCountry, testingMode);
+  if (!territoryCheck.available) return territoryCheck;
 
   const lookup = hexLookup ?? createHexLookup([]);
 
@@ -303,7 +331,8 @@ export function getAvailableBuildsForTile(
   existingBuildings: Record<string, PlacedBuilding>,
   testingMode = false,
   hexLookup?: Map<string, HexData>,
-  regionTech = 0
+  regionTech = 0,
+  playerCountry?: CountryId
 ): { build: BuildDefinition; tier: 1 | 2 | 3; availability: BuildAvailability }[] {
   const lookup = hexLookup ?? createHexLookup([]);
   const results: { build: BuildDefinition; tier: 1 | 2 | 3; availability: BuildAvailability }[] = [];
@@ -316,7 +345,8 @@ export function getAvailableBuildsForTile(
         tier,
         testingMode,
         lookup,
-        regionTech
+        regionTech,
+        playerCountry
       );
       const showBlocked =
         build.id === "transport_hub" ||

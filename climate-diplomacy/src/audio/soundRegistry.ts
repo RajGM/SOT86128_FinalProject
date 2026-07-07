@@ -25,6 +25,8 @@ import ambientMain from "../assets/audio/music/ambient-main.wav";
 import ambientTension from "../assets/audio/music/ambient-tension.wav";
 import ambientSummit from "../assets/audio/music/ambient-summit.wav";
 
+/** Bundled procedural WAV assets (see scripts/generate-audio.mjs); played via Web Audio after user unlock. */
+
 export type SoundId =
   | "click"
   | "tab-switch"

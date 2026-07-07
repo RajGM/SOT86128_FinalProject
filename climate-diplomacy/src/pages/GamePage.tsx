@@ -134,6 +134,9 @@ export function GamePage() {
 
   const multiplayerConfig = useMemo((): MultiplayerConfig | null => {
     if (!gameData || !assignedCountry) return null;
+    const humanPlayerCountries = Object.values(gameData.humanPlayers)
+      .filter((m) => m.connected && !m.exited)
+      .map((m) => m.country);
     return {
       roomId,
       playerId,
@@ -143,6 +146,8 @@ export function GamePage() {
       syncedState: gameData.gameState,
       syncedVersion: gameData.stateVersion ?? 0,
       onStateSync: handleStateSync,
+      humanPlayerCountries,
+      botControlled: gameData.botControlled,
     };
   }, [
     gameData,

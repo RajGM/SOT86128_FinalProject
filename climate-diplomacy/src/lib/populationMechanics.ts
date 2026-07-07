@@ -3,7 +3,7 @@ import type { PlacedBuilding, RegionState } from "../types/game";
 import type { BuildEffects, BuildType } from "../types/game";
 
 /** Per 100 population per cycle (population-mechanics.md). */
-export const PER_CAPITA_FOOD_PER_100 = 3;
+export const PER_CAPITA_FOOD_PER_100 = 5;
 export const PER_CAPITA_ENERGY_PER_100 = 2;
 export const PER_CAPITA_MONEY_PER_100 = 1;
 
@@ -54,11 +54,12 @@ export function computeNationalCo2HappinessDelta(co2: number): number {
   return -6;
 }
 
+/** Happiness penalties begin at +2.0°C (aligned with farm yield threshold). */
 export function computeTemperatureHappinessDelta(globalTemperature: number): number {
-  if (globalTemperature < 1.5) return 0;
-  if (globalTemperature <= 2.0) return -2;
-  if (globalTemperature <= 2.5) return -5;
-  if (globalTemperature <= 3.0) return -8;
+  if (globalTemperature < 2.0) return 0;
+  if (globalTemperature <= 2.5) return -2;
+  if (globalTemperature <= 3.0) return -5;
+  if (globalTemperature <= 3.5) return -8;
   return -12;
 }
 

@@ -20,6 +20,8 @@ import {
   computeTemperatureHappinessDelta,
   shouldForceAllBuildingsIdle,
 } from "../src/lib/populationMechanics";
+import { foodCyclesUntilEmpty } from "../src/lib/botAI";
+import { REGION_PROFILES } from "../src/config/regionProfiles";
 import { BUILD_BY_ID, TRADE_ITEMS } from "../src/config/builds";
 import type { PlacedBuilding } from "../src/types/game";
 import { emptyDepositCounts } from "../src/types/hex";
@@ -176,12 +178,34 @@ check("9 building types defined", Object.keys(BUILD_BY_ID).length === 9);
 
 // --- Population mechanics (population-mechanics.md) ---
 check(
-  "China per-capita food drain is 3/cycle",
-  computePerCapitaConsumption(90).food === 3
+  "China per-capita food drain is 5/cycle",
+  computePerCapitaConsumption(90).food === 5
 );
 check(
-  "USA per-capita food drain is 1/cycle",
-  computePerCapitaConsumption(33).food === 1
+  "Africa per-capita food drain is 4/cycle",
+  computePerCapitaConsumption(82).food === 4
+);
+check(
+  "USA per-capita food drain is 2/cycle",
+  computePerCapitaConsumption(33).food === 2
+);
+const chinaFamineCycles = foodCyclesUntilEmpty(
+  REGION_PROFILES.china.startingResources.food,
+  REGION_PROFILES.china.startingResources.population
+);
+check(
+  "China runs out of food in ~8–11 cycles without farms",
+  chinaFamineCycles >= 8 && chinaFamineCycles <= 11,
+  `got ${chinaFamineCycles}`
+);
+const africaFamineCycles = foodCyclesUntilEmpty(
+  REGION_PROFILES.africa.startingResources.food,
+  REGION_PROFILES.africa.startingResources.population
+);
+check(
+  "Africa runs out of food in ~6–8 cycles without farms",
+  africaFamineCycles >= 6 && africaFamineCycles <= 8,
+  `got ${africaFamineCycles}`
 );
 check(
   "USA CO₂ 72 gives +2 happiness/cycle (under 100 threshold)",
@@ -192,8 +216,12 @@ check(
   computeNationalCo2HappinessDelta(13) === 2
 );
 check(
-  "Global temp +2.3°C gives −5 happiness/cycle",
-  computeTemperatureHappinessDelta(2.3) === -5
+  "Global temp +2.3°C gives −2 happiness/cycle (first penalty tier)",
+  computeTemperatureHappinessDelta(2.3) === -2
+);
+check(
+  "Global temp +2.7°C gives −5 happiness/cycle",
+  computeTemperatureHappinessDelta(2.7) === -5
 );
 check(
   "Unrest halves city population yield",
@@ -210,8 +238,8 @@ check(
   computeFarmClimateFoodAdjustment(20, 2.5) === -4
 );
 check(
-  "No farm climate penalty at +1.5°C",
-  computeFarmClimateFoodAdjustment(20, 1.5) === 0
+  "No farm climate penalty below +2.0°C",
+  computeFarmClimateFoodAdjustment(20, 1.9) === 0
 );
 
 // Per-capita consumption runs each cycle

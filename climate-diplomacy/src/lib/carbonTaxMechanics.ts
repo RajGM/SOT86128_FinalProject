@@ -3,6 +3,7 @@ import { COUNTRY_CONFIGS } from "../types/hex";
 import type {
   BuildType,
   CarbonTaxRecycling,
+  GameState,
   RegionState,
   RelationAlert,
   RelationEvent,
@@ -71,6 +72,26 @@ export function resolveSubsidizedMoneyCost(
   }
   const { actualCost, remainingPool } = applyGreenSubsidyToCost(baseCost, region.greenSubsidyPool);
   return { cost: actualCost, greenSubsidyPool: remainingPool };
+}
+
+export function getCarbonTaxFloor(state: GameState, countryId?: CountryId): number {
+  let floor = 0;
+  for (const r of state.activeSummitResolutions) {
+    if (!r.active || !r.passed || r.boundaryType !== "temperature") continue;
+    floor = Math.max(floor, r.threshold);
+  }
+  void countryId;
+  return floor;
+}
+
+export function getCarbonTaxCeiling(state: GameState, countryId: CountryId): number | null {
+  for (const r of state.activeSummitResolutions) {
+    if (!r.active || !r.passed || r.boundaryType !== "political_stability") continue;
+    if (r.severityLevel && r.severityLevel >= 2) continue;
+    const ceiling = r.carbonTaxCeilingAtPassage?.[countryId];
+    if (ceiling !== undefined) return ceiling;
+  }
+  return null;
 }
 
 export const CARBON_TAX_RECYCLING_OPTIONS: {

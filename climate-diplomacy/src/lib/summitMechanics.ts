@@ -12,29 +12,15 @@ import type {
   TradeItem,
 } from "../types/game";
 import { computeAllCountryComparisons, DEVELOPING_RECIPIENTS, getStartingMoney } from "./comparisonMetrics";
-import { calculateTaxCollected } from "./carbonTaxMechanics";
+import { computeBotVote, BOT_STRATEGY_BY_COUNTRY, type BotStrategy } from "./botAI";
+
+export { computeBotVote, BOT_STRATEGY_BY_COUNTRY, type BotStrategy };
+export { getCarbonTaxFloor, getCarbonTaxCeiling } from "./carbonTaxMechanics";
 import { computePerCapitaConsumption } from "./populationMechanics";
 
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
 export const SUMMIT_VOTE_DURATION_MS = 30_000;
-
-export type BotStrategy =
-  | "fossil_maximiser"
-  | "green_pioneer"
-  | "pragmatic_balancer"
-  | "development_first";
-
-export const BOT_STRATEGY_BY_COUNTRY: Record<CountryId, BotStrategy> = {
-  opec: "fossil_maximiser",
-  russia: "fossil_maximiser",
-  eu: "green_pioneer",
-  latam: "green_pioneer",
-  usa: "pragmatic_balancer",
-  china: "pragmatic_balancer",
-  india: "development_first",
-  africa: "development_first",
-};
 
 export interface BoundaryBreachResult {
   boundaryType: SummitBoundaryType;
@@ -327,65 +313,6 @@ export function createPendingVote(
     votes: {},
     deadlineAt: Date.now() + SUMMIT_VOTE_DURATION_MS,
   };
-}
-
-function estimateTaxComplianceCost(region: RegionState, requiredTax: number): number {
-  const gap = Math.max(0, requiredTax - region.carbonTax);
-  if (gap <= 0) return 0;
-  return calculateTaxCollected(region.co2, gap);
-}
-
-function countryHasSurplus(region: RegionState, threshold: number): boolean {
-  return region.food > threshold || region.energy > threshold;
-}
-
-export function computeBotVote(
-  countryId: CountryId,
-  pending: PendingSummitVote,
-  regions: Record<CountryId, RegionState>
-): SummitVoteChoice {
-  const strategy = BOT_STRATEGY_BY_COUNTRY[countryId];
-  const ceiling = isCeilingResolution(pending.boundaryType);
-  const region = regions[countryId];
-
-  if (strategy === "fossil_maximiser") {
-    if (ceiling) return "no";
-    if (pending.boundaryType === "inequality" || pending.boundaryType === "human_development") {
-      return region.money > 60 || region.food > 100 || region.energy > 100 ? "no" : "yes";
-    }
-    if (pending.boundaryType === "political_stability") {
-      return region.happiness > 60 ? "no" : "yes";
-    }
-    return "no";
-  }
-
-  if (strategy === "green_pioneer") return "yes";
-
-  if (strategy === "development_first") {
-    if (pending.boundaryType === "inequality" || pending.boundaryType === "human_development") {
-      return "yes";
-    }
-    if (ceiling) {
-      return estimateTaxComplianceCost(region, pending.threshold) < 25 ? "yes" : "no";
-    }
-    return region.happiness < 50 ? "yes" : "abstain";
-  }
-
-  // pragmatic_balancer
-  if (ceiling) {
-    const cost = estimateTaxComplianceCost(region, pending.threshold);
-    return cost < 20 ? "yes" : "no";
-  }
-  if (pending.boundaryType === "human_development" || pending.boundaryType === "inequality") {
-    const isContributor =
-      region.money > 60 || region.food > pending.threshold || region.energy > pending.threshold;
-    if (!isContributor) return "yes";
-    return countryHasSurplus(region, pending.threshold) ? "no" : "yes";
-  }
-  if (pending.boundaryType === "political_stability") {
-    return region.happiness > 60 ? "no" : "yes";
-  }
-  return "abstain";
 }
 
 export function tallySummitVote(
@@ -751,26 +678,6 @@ export function shouldExpireResolution(
   void currentGlobalPopulation;
   void climateFinanceGiven;
   return false;
-}
-
-export function getCarbonTaxFloor(state: GameState, countryId: CountryId): number {
-  let floor = 0;
-  for (const r of state.activeSummitResolutions) {
-    if (!r.active || !r.passed || r.boundaryType !== "temperature") continue;
-    floor = Math.max(floor, r.threshold);
-  }
-  void countryId;
-  return floor;
-}
-
-export function getCarbonTaxCeiling(state: GameState, countryId: CountryId): number | null {
-  for (const r of state.activeSummitResolutions) {
-    if (!r.active || !r.passed || r.boundaryType !== "political_stability") continue;
-    if (r.severityLevel && r.severityLevel >= 2) continue;
-    const ceiling = r.carbonTaxCeilingAtPassage?.[countryId];
-    if (ceiling !== undefined) return ceiling;
-  }
-  return null;
 }
 
 export function isTradeRestrictionSuspended(state: GameState, cycle: number): boolean {

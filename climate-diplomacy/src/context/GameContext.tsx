@@ -55,6 +55,8 @@ import {
   canPostTier3Upgrade,
   getPostTier3UpgradeCost,
   canBuildOnTile,
+  canBuildInTerritory,
+  canPlayerBuildOnHex,
   canPlaceTransportHub,
 } from "../lib/buildRules";
 import { createHexLookup } from "../lib/hexUtils";
@@ -90,6 +92,7 @@ import {
   tallySummitVote,
 } from "../lib/summitMechanics";
 import { playSound } from "../audio/AudioManager";
+import { resolveBotCountries, runBotTurns } from "../lib/botAI";
 
 export interface MultiplayerConfig {
   roomId: string;
@@ -100,6 +103,9 @@ export interface MultiplayerConfig {
   syncedState?: GameState | null;
   syncedVersion?: number;
   onStateSync?: (state: GameState) => void;
+  /** Countries with a connected human player (not bot-operated). */
+  humanPlayerCountries?: CountryId[];
+  botControlled?: Partial<Record<CountryId, boolean>>;
 }
 
 interface GameContextValue {
@@ -110,6 +116,8 @@ interface GameContextValue {
   selectedHex: HexData | null;
   setSelectedHex: (hex: HexData | null) => void;
   viewCountry: CountryId;
+  /** Country used for build ownership checks — locked to assigned country in multiplayer. */
+  playerBuildCountry: CountryId;
   setViewCountry: (id: CountryId) => void;
   resourcesExpanded: boolean;
   toggleResourcesExpanded: () => void;
@@ -193,6 +201,14 @@ export function GameProvider({
   const [viewCountry, setViewCountry] = useState<CountryId>(
     () => multiplayer?.assignedCountry ?? "usa"
   );
+
+  const botCountries = useMemo(() => {
+    if (multiplayer?.humanPlayerCountries) {
+      return resolveBotCountries(multiplayer.humanPlayerCountries, multiplayer.botControlled);
+    }
+    return resolveBotCountries([viewCountry]);
+  }, [multiplayer?.humanPlayerCountries, multiplayer?.botControlled, viewCountry]);
+
   const [resourcesExpanded, setResourcesExpanded] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [dashboardTab, setDashboardTab] = useState<"technology" | "diplomacy" | "trade" | "routes" | "summit">("technology");
@@ -218,14 +234,25 @@ export function GameProvider({
     setViewCountry(multiplayer.assignedCountry);
   }, [multiplayer?.assignedCountry]);
 
+  const playerBuildCountry = useMemo(() => {
+    if (!gameState.testingMode && multiplayer?.assignedCountry) {
+      return multiplayer.assignedCountry;
+    }
+    return viewCountry;
+  }, [gameState.testingMode, multiplayer?.assignedCountry, viewCountry]);
+
   const toggleResourcesExpanded = useCallback(() => {
     setResourcesExpanded((v) => !v);
   }, []);
 
   const resolveRegionId = useCallback(
-    (hex: HexData) =>
-      gameState.testingMode && !hex.countryId ? viewCountry : getRegionForHex(hex.countryId),
-    [gameState.testingMode, viewCountry]
+    (hex: HexData) => {
+      if (!gameState.testingMode) {
+        return multiplayer?.assignedCountry ?? viewCountry;
+      }
+      return !hex.countryId ? viewCountry : getRegionForHex(hex.countryId);
+    },
+    [gameState.testingMode, viewCountry, multiplayer?.assignedCountry]
   );
 
   const placeBuild = useCallback(
@@ -251,7 +278,8 @@ export function GameProvider({
           tier,
           prev.testingMode,
           hexLookup,
-          region.technology
+          region.technology,
+          prev.testingMode ? undefined : playerBuildCountry
         );
         if (!placement.available) return prev;
         if (isConstructionBlocked(region.happiness)) return prev;
@@ -285,7 +313,7 @@ export function GameProvider({
       });
       if (placed) playSound("build-place");
     },
-    [selectedHex, resolveRegionId, hexLookup]
+    [selectedHex, resolveRegionId, hexLookup, playerBuildCountry]
   );
 
   const demolishBuild = useCallback(() => {
@@ -295,6 +323,13 @@ export function GameProvider({
 
     let demolished = false;
     setGameState((prev) => {
+      const territoryCheck = canBuildInTerritory(
+        selectedHex,
+        prev.testingMode ? undefined : playerBuildCountry,
+        prev.testingMode
+      );
+      if (!territoryCheck.available) return prev;
+
       const existing = prev.tileBuildings[key];
       if (!existing) return prev;
 
@@ -331,7 +366,7 @@ export function GameProvider({
       };
     });
     if (demolished) playSound("build-demolish");
-  }, [selectedHex, resolveRegionId]);
+  }, [selectedHex, resolveRegionId, playerBuildCountry]);
 
   const upgradeBuild = useCallback(() => {
     if (!selectedHex) return;
@@ -340,6 +375,13 @@ export function GameProvider({
 
     let upgraded = false;
     setGameState((prev) => {
+      const territoryCheck = canBuildInTerritory(
+        selectedHex,
+        prev.testingMode ? undefined : playerBuildCountry,
+        prev.testingMode
+      );
+      if (!territoryCheck.available) return prev;
+
       const existing = prev.tileBuildings[key];
       if (!existing || !canUpgradeTier(existing.tier)) return prev;
 
@@ -382,7 +424,7 @@ export function GameProvider({
       };
     });
     if (upgraded) playSound("build-upgrade");
-  }, [selectedHex, resolveRegionId, hexLookup]);
+  }, [selectedHex, resolveRegionId, hexLookup, playerBuildCountry]);
 
   const postTier3Upgrade = useCallback(() => {
     if (!selectedHex) return;
@@ -390,6 +432,13 @@ export function GameProvider({
     const regionId = resolveRegionId(selectedHex);
 
     setGameState((prev) => {
+      const territoryCheck = canBuildInTerritory(
+        selectedHex,
+        prev.testingMode ? undefined : playerBuildCountry,
+        prev.testingMode
+      );
+      if (!territoryCheck.available) return prev;
+
       const existing = prev.tileBuildings[key];
       if (!existing || !canPostTier3Upgrade(existing.type, existing.tier)) return prev;
 
@@ -411,7 +460,7 @@ export function GameProvider({
         },
       };
     });
-  }, [selectedHex, resolveRegionId, hexLookup]);
+  }, [selectedHex, resolveRegionId, playerBuildCountry]);
 
   const buildingsList = useMemo(
     () => Object.values(gameState.tileBuildings),
@@ -914,8 +963,8 @@ export function GameProvider({
   }, []);
 
   const advanceCycle = useCallback(() => {
-    setGameState((prev) => processCycle(prev, hexes));
-  }, [hexes]);
+    setGameState((prev) => processCycle(runBotTurns(prev, hexes, botCountries), hexes));
+  }, [hexes, botCountries]);
 
   const setCarbonTax = useCallback((countryId: CountryId, newRate: number) => {
     let changed = false;
@@ -1104,10 +1153,17 @@ export function GameProvider({
 
   const handleSetSelectedHex = useCallback((hex: HexData | null) => {
     setSelectedHex(hex);
-    if (hex?.countryId) setViewCountry(hex.countryId);
-    setBuildPanelOpen(!!hex);
+    if (hex?.countryId && gameState.testingMode) {
+      setViewCountry(hex.countryId);
+    }
+    const canBuild = canPlayerBuildOnHex(
+      hex,
+      gameState.testingMode,
+      playerBuildCountry
+    );
+    setBuildPanelOpen(!!hex && canBuild);
     setGameState((prev) => ({ ...prev, highlightedRoutes: [] }));
-  }, []);
+  }, [gameState.testingMode, playerBuildCountry, setGameState]);
 
   return (
     <GameContext.Provider
@@ -1119,6 +1175,7 @@ export function GameProvider({
         selectedHex,
         setSelectedHex: handleSetSelectedHex,
         viewCountry,
+        playerBuildCountry,
         setViewCountry,
         resourcesExpanded,
         toggleResourcesExpanded,

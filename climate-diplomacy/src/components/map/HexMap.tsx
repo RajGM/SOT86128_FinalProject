@@ -299,7 +299,7 @@ export function HexMap({ hexes, multiplayerMode = false }: HexMapProps) {
           zIndex: 5,
         }}
       >
-        Scroll to zoom · Drag to pan · Click hex to build
+        Scroll to zoom · Drag to pan · Click hex{multiplayerMode ? " for info" : " to build"}
       </div>
     </div>
   );

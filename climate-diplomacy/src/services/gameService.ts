@@ -21,10 +21,15 @@ import type {
 import {
   assignCountriesToPlayers,
   createGameStateFromSettings,
+  getUnassignedCountries,
 } from "../lib/gameBootstrap";
 import { hydrateGameState } from "../lib/gameState";
 import { buildPlayerResults } from "../lib/scoring";
-import { assignCountriesAtStart, updateRoomStatus } from "./roomService";
+import {
+  assignCountriesAtStart,
+  removeFromActiveRooms,
+  updateRoomStatus,
+} from "./roomService";
 
 export async function startGame(
   room: Room,
@@ -46,6 +51,10 @@ export async function startGame(
 
   const gameState = createGameStateFromSettings(hexes, room.settings);
   const now = Date.now();
+  const botControlled: Partial<Record<CountryId, boolean>> = {};
+  for (const id of getUnassignedCountries(assignments)) {
+    botControlled[id] = true;
+  }
   const gameData: GameData = {
     roomId: room.roomId,
     cycle: 1,
@@ -55,7 +64,7 @@ export async function startGame(
       durationMs: room.settings.cycleTimerMinutes * 60 * 1000,
     },
     humanPlayers,
-    botControlled: {},
+    botControlled,
     settings: room.settings,
     hostId: room.hostId,
     stateVersion: 1,
@@ -179,6 +188,7 @@ export async function endGame(
     endReason: reason,
     statsShownAt: Date.now(),
   });
+  await removeFromActiveRooms(roomId);
   await updateRoomStatus(roomId, "ending");
 
   return results;

@@ -16,6 +16,7 @@ import type {
   RoomPlayer,
   RoomSettings,
 } from "../types/multiplayer";
+import { ROOM_IDLE_MS } from "../lib/scoring";
 import { generateUniqueRoomId } from "../lib/roomId";
 
 function activeRoomIndex(room: Room): ActiveRoomIndex {
@@ -27,6 +28,46 @@ function activeRoomIndex(room: Room): ActiveRoomIndex {
     preset: room.settings.preset,
     createdAt: room.createdAt,
   };
+}
+
+function isListableRoomStatus(status: Room["status"]): boolean {
+  return status === "waiting" || status === "active";
+}
+
+export async function removeFromActiveRooms(roomId: string): Promise<void> {
+  const db = getFirebaseDb();
+  await remove(ref(db, `activeRooms/${roomId}`));
+}
+
+/** Remove stale activeRooms entries and abandoned waiting lobbies on landing page load. */
+export async function pruneStaleActiveRooms(): Promise<void> {
+  const db = getFirebaseDb();
+  const snap = await get(ref(db, "activeRooms"));
+  if (!snap.exists()) return;
+
+  const entries = snap.val() as Record<string, ActiveRoomIndex>;
+  for (const roomId of Object.keys(entries)) {
+    const room = await getRoom(roomId);
+    if (!room) {
+      await removeFromActiveRooms(roomId);
+      continue;
+    }
+
+    const archiveSnap = await get(ref(db, `archive/${roomId}`));
+    if (archiveSnap.exists() || !isListableRoomStatus(room.status)) {
+      await removeFromActiveRooms(roomId);
+      continue;
+    }
+
+    if (
+      room.status === "waiting" &&
+      Date.now() - room.lastActivity > ROOM_IDLE_MS
+    ) {
+      await remove(ref(db, `rooms/${roomId}`));
+      await remove(ref(db, `games/${roomId}`));
+      await removeFromActiveRooms(roomId);
+    }
+  }
 }
 
 export async function createRoom(
@@ -212,6 +253,12 @@ export async function updateRoomStatus(
     status,
     lastActivity: Date.now(),
   });
+
+  if (!isListableRoomStatus(status)) {
+    await removeFromActiveRooms(roomId);
+    return;
+  }
+
   const room = await getRoom(roomId);
   if (room) {
     await set(ref(db, `activeRooms/${roomId}`), activeRoomIndex({ ...room, status }));

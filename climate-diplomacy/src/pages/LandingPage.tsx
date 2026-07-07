@@ -3,7 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { isFirebaseConfigured } from "../config/firebase";
 import { getDisplayName, getPlayerId, setDisplayName } from "../lib/playerIdentity";
 import type { ActiveRoomIndex, RoomSettings } from "../types/multiplayer";
-import { createRoom, joinRoom, joinErrorMessage, subscribeActiveRooms } from "../services/roomService";
+import {
+  createRoom,
+  joinRoom,
+  joinErrorMessage,
+  pruneStaleActiveRooms,
+  subscribeActiveRooms,
+} from "../services/roomService";
 import { HostSettingsModal } from "../components/lobby/HostSettingsModal";
 import { JoinModal } from "../components/lobby/JoinModal";
 import { MusicToggle, SettingsGear } from "../components/settings/SettingsGear";
@@ -25,6 +31,7 @@ export function LandingPage() {
 
   useEffect(() => {
     if (!isFirebaseConfigured) return;
+    void pruneStaleActiveRooms();
     return subscribeActiveRooms(setActiveRooms);
   }, []);
 
