@@ -18,7 +18,6 @@ import type {
   PlayerResult,
   Room,
 } from "../types/multiplayer";
-import { MULTIPLAYER_CYCLE_MS } from "../config/constants";
 import {
   assignCountriesToPlayers,
   createGameStateFromSettings,
@@ -52,6 +51,10 @@ export async function startGame(
 
   const gameState = createGameStateFromSettings(hexes, room.settings);
   const now = Date.now();
+  const cycleDurationMs =
+    room.settings.cycleTimerMinutes > 0
+      ? room.settings.cycleTimerMinutes * 60_000
+      : 0;
   const botControlled: Partial<Record<CountryId, boolean>> = {};
   for (const id of getUnassignedCountries(assignments)) {
     botControlled[id] = true;
@@ -62,7 +65,7 @@ export async function startGame(
     gameState,
     cycleTimer: {
       startedAt: now,
-      durationMs: MULTIPLAYER_CYCLE_MS,
+      durationMs: cycleDurationMs,
     },
     humanPlayers,
     botControlled,

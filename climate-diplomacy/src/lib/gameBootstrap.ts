@@ -3,6 +3,11 @@ import { COUNTRY_CONFIGS } from "../types/hex";
 import type { GameState } from "../types/game";
 import type { RoomSettings } from "../types/multiplayer";
 import { createTestScenarioState } from "../data/testScenario";
+import {
+  applyRichResources,
+  gameModeFromSettings,
+} from "./gameMode";
+import { createInitialGameState } from "./gameState";
 
 const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 
@@ -26,15 +31,34 @@ export function assignCountriesToPlayers(
   return result;
 }
 
-/** Rich mid-game state (cycle 15 test scenario) for multiplayer — real build/trade rules. */
 export function createGameStateFromSettings(
   hexes: HexData[],
-  _settings: RoomSettings
+  settings: RoomSettings
 ): GameState {
-  return {
-    ...createTestScenarioState(hexes),
+  const gameMode = gameModeFromSettings(settings);
+
+  if (settings.preset === "hard") {
+    return {
+      ...createTestScenarioState(hexes),
+      testingMode: false,
+      gameMode,
+      globalTemperature: settings.startingTemperature,
+    };
+  }
+
+  let state: GameState = {
+    ...createInitialGameState(hexes),
     testingMode: false,
+    gameMode,
+    globalTemperature: settings.startingTemperature,
+    cycle: 1,
+    activeSummitResolutions: [],
+    summitHistory: [],
+    summitComplianceAlerts: [],
   };
+
+  state = applyRichResources(state);
+  return state;
 }
 
 export function getUnassignedCountries(

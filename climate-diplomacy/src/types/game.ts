@@ -1,5 +1,6 @@
 import type { CountryId, HexData, ResourceDeposit, TerrainType } from "./hex";
 import { RESOURCE_LABELS } from "./hex";
+import type { GameModeConfig } from "./multiplayer";
 
 export type BuildCategory =
   | "energy"
@@ -413,6 +414,8 @@ export interface GameState {
   globalTemperature: number;
   cycle: number;
   testingMode: boolean;
+  /** Multiplayer difficulty rules — omitted in legacy saves / test mode. */
+  gameMode?: GameModeConfig;
   /** CO₂ at start of current cycle — used for faction satisfaction deltas. */
   cycleStartCo2: Partial<Record<CountryId, number>>;
   /** Carbon tax rate at start of current cycle — used for faction satisfaction deltas. */

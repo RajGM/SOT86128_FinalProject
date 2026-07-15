@@ -24,17 +24,18 @@ export function GameTopBar({
     return `${COUNTRY_CONFIGS[country].name} (${multiplayer.playerName})`;
   }, [multiplayer]);
 
-  const timerLabel =
-    cycleRemainingSec !== undefined
-      ? `${Math.floor(cycleRemainingSec / 60)}:${String(cycleRemainingSec % 60).padStart(2, "0")}`
-      : null;
+  const timerLabel = useMemo(() => {
+    if (gameState.gameMode?.manualCycleAdvance) return "Manual";
+    if (cycleRemainingSec === undefined) return null;
+    return `${Math.floor(cycleRemainingSec / 60)}:${String(cycleRemainingSec % 60).padStart(2, "0")}`;
+  }, [cycleRemainingSec, gameState.gameMode?.manualCycleAdvance]);
 
   return (
     <div className="game-top-bar">
       <div className="game-top-bar-left">
         <span>
           Cycle {gameState.cycle}
-          {timerLabel ? ` / ${timerLabel}` : ""}
+          {timerLabel ? ` · ${timerLabel}` : ""}
         </span>
         {countryLabel && <span style={{ color: "rgba(255,255,255,0.75)" }}>{countryLabel}</span>}
       </div>

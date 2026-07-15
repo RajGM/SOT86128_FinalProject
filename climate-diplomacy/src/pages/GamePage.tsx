@@ -31,7 +31,6 @@ import { MultiplayerCycleController } from "../components/game/MultiplayerCycleC
 import { StatsScreen } from "../components/endgame/StatsScreen";
 import { EndGameVoteModal, useEndGameVote } from "../components/endgame/EndGameVoteModal";
 import { SettingsGear } from "../components/settings/SettingsGear";
-import { MULTIPLAYER_CYCLE_MS } from "../config/constants";
 import { STATS_VIEW_MS, ARCHIVE_GRACE_MS } from "../lib/scoring";
 import "../components/ui/overlay.css";
 
@@ -81,7 +80,10 @@ export function GamePage() {
   }, [roomId, playerId, assignedCountry]);
 
   useEffect(() => {
-    if (!gameData?.cycleTimer) return;
+    if (!gameData?.cycleTimer || gameData.cycleTimer.durationMs <= 0) {
+      setCycleRemainingSec(undefined);
+      return;
+    }
     const tick = () => {
       const elapsed = Date.now() - gameData.cycleTimer.startedAt;
       const remaining = Math.max(0, Math.ceil((gameData.cycleTimer.durationMs - elapsed) / 1000));
@@ -148,9 +150,14 @@ export function GamePage() {
   );
 
   const handleCycleTimerReset = useCallback(() => {
-    if (!roomId || !isHost) return;
-    void updateCycleTimer(roomId, Date.now(), MULTIPLAYER_CYCLE_MS);
-  }, [roomId, isHost]);
+    if (!roomId || !isHost || !gameData) return;
+    const durationMs =
+      gameData.settings.cycleTimerMinutes > 0
+        ? gameData.settings.cycleTimerMinutes * 60_000
+        : 0;
+    if (durationMs <= 0) return;
+    void updateCycleTimer(roomId, Date.now(), durationMs);
+  }, [roomId, isHost, gameData]);
 
   const multiplayerConfig = useMemo((): MultiplayerConfig | null => {
     if (!gameData || !assignedCountry) return null;

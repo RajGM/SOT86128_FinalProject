@@ -15,7 +15,8 @@ const ALL_COUNTRIES = Object.keys(COUNTRY_CONFIGS) as CountryId[];
 export function SummitPanel() {
   const { gameState } = useGame();
   const { activeSummitResolutions, summitComplianceAlerts } = gameState;
-  const taxFloor = getCarbonTaxFloor(gameState, "usa");
+  const summitEnabled = gameState.gameMode?.enableSummitResolutions ?? true;
+  const taxFloor = summitEnabled ? getCarbonTaxFloor(gameState, "usa") : 0;
 
   const activeResolutions = activeSummitResolutions.filter((r) => r.active && r.passed);
 
@@ -23,8 +24,9 @@ export function SummitPanel() {
     <div>
       <div className="section-title">Summit Resolutions — Doughnut Boundaries</div>
       <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 10 }}>
-        Resolutions are automatically enacted when planetary boundaries are breached. Compliance is
-        optional but affects diplomatic relations.
+        {summitEnabled
+          ? "Resolutions are automatically enacted when planetary boundaries are breached. Compliance is optional but affects diplomatic relations."
+          : "Summit resolutions are disabled in Easy mode — no global CO₂ cooperation pressure."}
       </p>
 
       {taxFloor > 0 && (

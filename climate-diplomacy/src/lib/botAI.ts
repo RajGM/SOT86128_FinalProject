@@ -904,6 +904,7 @@ function targetCarbonTax(
 }
 
 function tryAdjustCarbonTax(state: GameState, countryId: CountryId, force = false): GameState {
+  if (state.gameMode && !state.gameMode.enableCarbonTax) return state;
   const region = state.regions[countryId];
   const strategy = BOT_STRATEGY_BY_COUNTRY[countryId];
   const floor = getCarbonTaxFloor(state, countryId);

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getDisplayName, getPlayerId } from "../lib/playerIdentity";
 import type { Room } from "../types/multiplayer";
+import { formatPresetLabel } from "../lib/roomPresets";
 import {
   joinRoom,
+  kickPlayer,
   leaveRoom,
   setPlayerReady,
   setupPresence,
@@ -46,6 +48,12 @@ export function LobbyPage() {
     }
   }, [room?.status, navigate, roomId]);
 
+  useEffect(() => {
+    if (room && !room.players[playerId]) {
+      navigate("/");
+    }
+  }, [room, playerId, navigate]);
+
   const me = room?.players[playerId];
   const isHost = room?.hostId === playerId;
   const playerIds = room
@@ -79,6 +87,21 @@ export function LobbyPage() {
     navigate("/");
   };
 
+  const handleKick = async (targetId: string) => {
+    if (!room || !isHost) return;
+    if (!window.confirm(`Remove ${room.players[targetId]?.name ?? "this player"} from the lobby?`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await kickPlayer(roomId, playerId, targetId);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to kick player");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleStart = useCallback(async () => {
     if (!room || !canStart) return;
     setBusy(true);
@@ -101,6 +124,11 @@ export function LobbyPage() {
   }
 
   const slots = Array.from({ length: room.settings.maxPlayers }, (_, i) => playerIds[i] ?? null);
+  const presetLabel = formatPresetLabel(room.settings.preset);
+  const timerLabel =
+    room.settings.cycleTimerMinutes > 0
+      ? `${room.settings.cycleTimerMinutes} min rounds`
+      : "Manual rounds (host advances)";
 
   return (
     <div className="lobby-page">
@@ -118,8 +146,7 @@ export function LobbyPage() {
         <div className="lobby-meta">
           <div>Host: {room.hostName}</div>
           <div>
-            Settings: Standard mid-game scenario, {room.settings.cycleTimerMinutes} min cycles,{" "}
-            {room.settings.maxPlayers} max
+            Mode: <strong>{presetLabel}</strong> · {timerLabel} · {room.settings.maxPlayers} max
           </div>
         </div>
 
@@ -144,8 +171,20 @@ export function LobbyPage() {
                   {isPlayerHost ? " (Host)" : ""}
                   {p.connected === false ? " — disconnected" : ""}
                 </span>
-                <span className={p.ready ? "player-ready" : "player-not-ready"}>
-                  {p.ready ? "● Ready" : "○ Not Ready"}
+                <span className="player-row-actions">
+                  <span className={p.ready ? "player-ready" : "player-not-ready"}>
+                    {p.ready ? "● Ready" : "○ Not Ready"}
+                  </span>
+                  {isHost && !isPlayerHost && (
+                    <button
+                      type="button"
+                      className="overlay-btn danger kick-btn"
+                      disabled={busy}
+                      onClick={() => void handleKick(pid)}
+                    >
+                      Kick
+                    </button>
+                  )}
                 </span>
               </div>
             );

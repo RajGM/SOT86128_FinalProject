@@ -3,7 +3,18 @@ import type { GameState } from "./game";
 import type { MetricGaps, MetricRawValues } from "../lib/comparisonMetrics";
 
 export type RoomStatus = "waiting" | "active" | "ending" | "archived";
-export type PresetId = "easy" | "normal" | "hard" | "custom";
+export type PresetId = "easy" | "medium" | "hard" | "custom";
+
+/** Runtime rules derived from lobby difficulty preset. */
+export interface GameModeConfig {
+  preset: PresetId;
+  /** Climate/temperature models inactive while cycle ≤ this value. */
+  climateGraceUntilCycle: number;
+  enableCarbonTax: boolean;
+  enableSummitResolutions: boolean;
+  /** Host manually advances cycles (no auto timer). */
+  manualCycleAdvance: boolean;
+}
 
 export interface StartingInfraSettings {
   fossilPlant: boolean;

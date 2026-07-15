@@ -55,6 +55,11 @@ import {
   applySummitNonComplianceRelations,
 } from "./relationMechanics";
 import {
+  applyShortageHappinessOnly,
+  DEFAULT_GAME_MODE,
+  isClimateModelsActive,
+} from "./gameMode";
+import {
   checkBoundariesInOrder,
   enactResolutionFromBreach,
   checkResolutionCompliance,
@@ -304,6 +309,7 @@ export function hydrateGameState(
     relationAlerts: partial.relationAlerts ?? defaults.relationAlerts,
     climateFinanceThisCycle:
       partial.climateFinanceThisCycle ?? defaults.climateFinanceThisCycle,
+    gameMode: partial.gameMode ?? defaults.gameMode,
   };
 }
 
@@ -479,6 +485,11 @@ export function applyClimateFinanceUpdate(
  * 14. Advance cycle
  */
 export function processCycle(prev: GameState, hexes: HexData[] = []): GameState {
+  const gameMode = prev.gameMode ?? DEFAULT_GAME_MODE;
+  const climateActive = isClimateModelsActive(gameMode, prev.cycle);
+  const summitEnabled = gameMode.enableSummitResolutions;
+  const carbonTaxEnabled = gameMode.enableCarbonTax;
+
   let regions = { ...prev.regions };
   let tileBuildings = { ...prev.tileBuildings };
   let transitAgreements = [...prev.transitAgreements];
@@ -719,48 +730,54 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   }
 
   // 8b. Carbon tax collection and recycling (before temperature update)
-  const carbonTaxResult = processCarbonTaxCollection(
-    regions,
-    cycleCo2ByCountry,
-    climateFinanceGiven,
-    climateFinanceThisCycle,
-    relationEvents,
-    relationAlerts,
-    prev.cycle
-  );
-  regions = carbonTaxResult.regions;
-  climateFinanceGiven = carbonTaxResult.climateFinanceGiven;
-  climateFinanceThisCycle = carbonTaxResult.climateFinanceThisCycle;
-  relationEvents = carbonTaxResult.relationEvents;
-  relationAlerts = carbonTaxResult.relationAlerts;
+  if (carbonTaxEnabled) {
+    const carbonTaxResult = processCarbonTaxCollection(
+      regions,
+      cycleCo2ByCountry,
+      climateFinanceGiven,
+      climateFinanceThisCycle,
+      relationEvents,
+      relationAlerts,
+      prev.cycle
+    );
+    regions = carbonTaxResult.regions;
+    climateFinanceGiven = carbonTaxResult.climateFinanceGiven;
+    climateFinanceThisCycle = carbonTaxResult.climateFinanceThisCycle;
+    relationEvents = carbonTaxResult.relationEvents;
+    relationAlerts = carbonTaxResult.relationAlerts;
+  }
 
   // 8–9. CO₂ sum → temperature
-  globalTemperature += co2TemperatureDelta(cycleCo2);
+  if (climateActive) {
+    globalTemperature += co2TemperatureDelta(cycleCo2);
+  }
 
   // 10. Climate effects — farm yield penalty above +2.0°C (uses updated temperature)
-  for (const id of ALL_COUNTRIES) {
-    const regionBuildings = Object.values(tileBuildings).filter((b) => b.countryId === id);
-    let region = regions[id];
-    const startHappiness = region.happiness;
-    const workforceIdle = computeIdleBuildingIds(regionBuildings, region.population, startHappiness);
-    const materialIdle = computeMaterialShortageIdleIds(
-      regionBuildings,
-      workforceIdle,
-      region.deposits
-    );
+  if (climateActive) {
+    for (const id of ALL_COUNTRIES) {
+      const regionBuildings = Object.values(tileBuildings).filter((b) => b.countryId === id);
+      let region = regions[id];
+      const startHappiness = region.happiness;
+      const workforceIdle = computeIdleBuildingIds(regionBuildings, region.population, startHappiness);
+      const materialIdle = computeMaterialShortageIdleIds(
+        regionBuildings,
+        workforceIdle,
+        region.deposits
+      );
 
-    for (const building of regionBuildings) {
-      if (building.type !== "farm") continue;
-      if (workforceIdle.has(building.id) || materialIdle.has(building.id)) continue;
-      const baseFood = BUILD_BY_ID.farm.effectsByTier[building.tier].food ?? 0;
-      if (baseFood <= 0) continue;
-      const adjustment = computeFarmClimateFoodAdjustment(baseFood, globalTemperature);
-      if (adjustment !== 0) {
-        region = { ...region, food: region.food + adjustment };
+      for (const building of regionBuildings) {
+        if (building.type !== "farm") continue;
+        if (workforceIdle.has(building.id) || materialIdle.has(building.id)) continue;
+        const baseFood = BUILD_BY_ID.farm.effectsByTier[building.tier].food ?? 0;
+        if (baseFood <= 0) continue;
+        const adjustment = computeFarmClimateFoodAdjustment(baseFood, globalTemperature);
+        if (adjustment !== 0) {
+          region = { ...region, food: region.food + adjustment };
+        }
       }
-    }
 
-    regions = { ...regions, [id]: region };
+      regions = { ...regions, [id]: region };
+    }
   }
 
   // 11. Happiness update (uses post-temperature global temp)
@@ -772,7 +789,9 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   for (const id of ALL_COUNTRIES) {
     regions = {
       ...regions,
-      [id]: applyHappinessUpdate(regions[id], globalTemperature),
+      [id]: climateActive
+        ? applyHappinessUpdate(regions[id], globalTemperature)
+        : applyShortageHappinessOnly(regions[id]),
     };
   }
 
@@ -887,132 +906,134 @@ export function processCycle(prev: GameState, hexes: HexData[] = []): GameState 
   let factionCycleEventsFinal = { ...factionCycleEvents };
   let tradeRestrictionSuspensionUntil = prev.tradeRestrictionSuspensionUntil;
 
-  for (const resolution of activeSummitResolutions) {
-    if (
-      resolution.tradeRestrictionsSuspendedUntil !== null &&
-      resolution.tradeRestrictionsSuspendedUntil > tradeRestrictionSuspensionUntil
-    ) {
-      tradeRestrictionSuspensionUntil = resolution.tradeRestrictionsSuspendedUntil;
-    }
-  }
-
-  activeSummitResolutions = activeSummitResolutions.map((resolution) => {
-    if (!resolution.active || !resolution.passed) return resolution;
-
-    const compliance = { ...resolution.compliance };
-    const targets = getResolutionTargets(resolution, regions);
-
-    for (const countryId of ALL_COUNTRIES) {
-      const result = checkResolutionCompliance(
-        resolution,
-        countryId,
-        regions,
-        prev.cycle,
-        prev.cycleTradeOffers,
-        prev.cycleCompletedTransfers
-      );
-      summitComplianceResults.push(result);
-
-      const tracksCompliance =
-        targets.includes(countryId) || resolution.boundaryType === "political_stability";
-      if (tracksCompliance) {
-        compliance[countryId] = result.compliant;
-      }
-    }
-
-    for (const countryId of targets) {
-      if (compliance[countryId]) continue;
-
-      const countryName = COUNTRY_CONFIGS[countryId].name;
-      summitComplianceAlerts.push(
-        `⚠️ ${countryName} is non-compliant with "${resolution.resolutionText}". Relations deteriorating.`
-      );
-      summitNonComplianceStrikes = {
-        ...summitNonComplianceStrikes,
-        [countryId]: (summitNonComplianceStrikes[countryId] ?? 0) + 1,
-      };
-      const compliantCountries = ALL_COUNTRIES.filter(
-        (id) => id !== countryId && compliance[id]
-      );
-      const ncRel = applySummitNonComplianceRelations(
-        regions,
-        countryId,
-        compliantCountries,
-        resolution.resolutionText,
-        prev.cycle,
-        relationEvents,
-        relationAlerts
-      );
-      regions = ncRel.regions;
-      relationEvents = ncRel.relationEvents;
-      relationAlerts = ncRel.relationAlerts;
-
-      const prevEvents =
-        factionCycleEventsFinal[countryId] ?? createEmptyFactionCycleEvents();
-      factionCycleEventsFinal = {
-        ...factionCycleEventsFinal,
-        [countryId]: { ...prevEvents, summitNonCompliance: true },
-      };
-      const region = regions[countryId];
-      regions = {
-        ...regions,
-        [countryId]: {
-          ...region,
-          factions: applyFactionSatisfactionChanges(region.factions, {
-            ...prevEvents,
-            summitNonCompliance: true,
-          }),
-        },
-      };
-    }
-
-    return { ...resolution, compliance };
-  });
-
-  activeSummitResolutions = activeSummitResolutions.map((r) => {
-    if (
-      shouldExpireResolution(
-        r,
-        regions,
-        prev.cycle,
-        worldHappiness,
-        peakGlobalPopulation,
-        currentGlobalPopulation,
-        climateFinanceGiven
-      )
-    ) {
-      return { ...r, active: false };
-    }
-    return r;
-  });
-
-  const breach = checkBoundariesInOrder({
-    regions,
-    globalTemperature,
-    globalCo2ThisCycle: cycleCo2,
-    worldHappiness,
-    cycle: prev.cycle,
-    climateFinanceGiven,
-    peakGlobalPopulation,
-    currentGlobalPopulation,
-    cycleCo2ByCountry,
-  });
-  if (breach) {
-    const hasActiveForBoundary = activeSummitResolutions.some(
-      (r) => r.active && r.passed && r.boundaryType === breach.boundaryType
-    );
-    if (!hasActiveForBoundary) {
-      const resolution = enactResolutionFromBreach(breach, regions, prev.cycle);
-      activeSummitResolutions = replaceSupersededResolutions(
-        activeSummitResolutions,
-        resolution
-      );
-      summitHistory = [...summitHistory, resolution];
+  if (summitEnabled) {
+    for (const resolution of activeSummitResolutions) {
       if (
         resolution.tradeRestrictionsSuspendedUntil !== null &&
         resolution.tradeRestrictionsSuspendedUntil > tradeRestrictionSuspensionUntil
       ) {
         tradeRestrictionSuspensionUntil = resolution.tradeRestrictionsSuspendedUntil;
+      }
+    }
+
+    activeSummitResolutions = activeSummitResolutions.map((resolution) => {
+      if (!resolution.active || !resolution.passed) return resolution;
+
+      const compliance = { ...resolution.compliance };
+      const targets = getResolutionTargets(resolution, regions);
+
+      for (const countryId of ALL_COUNTRIES) {
+        const result = checkResolutionCompliance(
+          resolution,
+          countryId,
+          regions,
+          prev.cycle,
+          prev.cycleTradeOffers,
+          prev.cycleCompletedTransfers
+        );
+        summitComplianceResults.push(result);
+
+        const tracksCompliance =
+          targets.includes(countryId) || resolution.boundaryType === "political_stability";
+        if (tracksCompliance) {
+          compliance[countryId] = result.compliant;
+        }
+      }
+
+      for (const countryId of targets) {
+        if (compliance[countryId]) continue;
+
+        const countryName = COUNTRY_CONFIGS[countryId].name;
+        summitComplianceAlerts.push(
+          `⚠️ ${countryName} is non-compliant with "${resolution.resolutionText}". Relations deteriorating.`
+        );
+        summitNonComplianceStrikes = {
+          ...summitNonComplianceStrikes,
+          [countryId]: (summitNonComplianceStrikes[countryId] ?? 0) + 1,
+        };
+        const compliantCountries = ALL_COUNTRIES.filter(
+          (id) => id !== countryId && compliance[id]
+        );
+        const ncRel = applySummitNonComplianceRelations(
+          regions,
+          countryId,
+          compliantCountries,
+          resolution.resolutionText,
+          prev.cycle,
+          relationEvents,
+          relationAlerts
+        );
+        regions = ncRel.regions;
+        relationEvents = ncRel.relationEvents;
+        relationAlerts = ncRel.relationAlerts;
+
+        const prevEvents =
+          factionCycleEventsFinal[countryId] ?? createEmptyFactionCycleEvents();
+        factionCycleEventsFinal = {
+          ...factionCycleEventsFinal,
+          [countryId]: { ...prevEvents, summitNonCompliance: true },
+        };
+        const region = regions[countryId];
+        regions = {
+          ...regions,
+          [countryId]: {
+            ...region,
+            factions: applyFactionSatisfactionChanges(region.factions, {
+              ...prevEvents,
+              summitNonCompliance: true,
+            }),
+          },
+        };
+      }
+
+      return { ...resolution, compliance };
+    });
+
+    activeSummitResolutions = activeSummitResolutions.map((r) => {
+      if (
+        shouldExpireResolution(
+          r,
+          regions,
+          prev.cycle,
+          worldHappiness,
+          peakGlobalPopulation,
+          currentGlobalPopulation,
+          climateFinanceGiven
+        )
+      ) {
+        return { ...r, active: false };
+      }
+      return r;
+    });
+
+    const breach = checkBoundariesInOrder({
+      regions,
+      globalTemperature,
+      globalCo2ThisCycle: cycleCo2,
+      worldHappiness,
+      cycle: prev.cycle,
+      climateFinanceGiven,
+      peakGlobalPopulation,
+      currentGlobalPopulation,
+      cycleCo2ByCountry,
+    });
+    if (breach) {
+      const hasActiveForBoundary = activeSummitResolutions.some(
+        (r) => r.active && r.passed && r.boundaryType === breach.boundaryType
+      );
+      if (!hasActiveForBoundary) {
+        const resolution = enactResolutionFromBreach(breach, regions, prev.cycle);
+        activeSummitResolutions = replaceSupersededResolutions(
+          activeSummitResolutions,
+          resolution
+        );
+        summitHistory = [...summitHistory, resolution];
+        if (
+          resolution.tradeRestrictionsSuspendedUntil !== null &&
+          resolution.tradeRestrictionsSuspendedUntil > tradeRestrictionSuspensionUntil
+        ) {
+          tradeRestrictionSuspensionUntil = resolution.tradeRestrictionsSuspendedUntil;
+        }
       }
     }
   }

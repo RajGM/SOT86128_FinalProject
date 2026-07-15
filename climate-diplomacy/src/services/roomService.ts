@@ -192,6 +192,31 @@ export async function setupPresence(
   await onDisconnect(connectedRef).set(false);
 }
 
+/** Remove a player from the lobby (host only). */
+export async function kickPlayer(
+  roomId: string,
+  hostId: string,
+  targetPlayerId: string
+): Promise<void> {
+  const room = await getRoom(roomId);
+  if (!room) throw new Error("Room not found");
+  if (room.hostId !== hostId) throw new Error("Only the host can kick players");
+  if (targetPlayerId === hostId) throw new Error("Cannot kick yourself");
+  if (!room.players[targetPlayerId]) throw new Error("Player not in room");
+  if (room.status !== "waiting") throw new Error("Cannot kick after the game has started");
+
+  const db = getFirebaseDb();
+  await update(ref(db, `rooms/${roomId}`), {
+    lastActivity: Date.now(),
+    [`players/${targetPlayerId}`]: null,
+  });
+
+  const updated = await getRoom(roomId);
+  if (updated) {
+    await set(ref(db, `activeRooms/${roomId}`), activeRoomIndex(updated));
+  }
+}
+
 export async function leaveRoom(roomId: string, playerId: string): Promise<void> {
   const db = getFirebaseDb();
   const room = await getRoom(roomId);

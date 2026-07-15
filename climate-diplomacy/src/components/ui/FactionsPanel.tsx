@@ -55,6 +55,7 @@ export function FactionsPanel() {
 
   const taxFloor = getCarbonTaxFloor(gameState, viewCountry);
   const taxCeiling = getCarbonTaxCeiling(gameState, viewCountry);
+  const carbonTaxEnabled = gameState.gameMode?.enableCarbonTax ?? true;
 
   return (
     <div>
@@ -123,8 +124,10 @@ export function FactionsPanel() {
         </div>
       </div>
 
-      <div className="section-title">Carbon Tax</div>
-      <div className="card">
+      {carbonTaxEnabled ? (
+        <>
+          <div className="section-title">Carbon Tax</div>
+          <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
           <span style={{ minWidth: 72 }}>
             Rate: <strong>{region.carbonTax}</strong>/100
@@ -223,7 +226,13 @@ export function FactionsPanel() {
           directly — replace fossil infrastructure to cut emissions. Summit votes and compliance
           are on the Dashboard → Summit tab.
         </p>
-      </div>
+          </div>
+        </>
+      ) : (
+        <div className="card" style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
+          Carbon tax and summit cooperation mechanics are disabled in Easy mode.
+        </div>
+      )}
     </div>
   );
 }

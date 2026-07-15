@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isFirebaseConfigured } from "../config/firebase";
 import { getDisplayName, getPlayerId, setDisplayName } from "../lib/playerIdentity";
-import type { ActiveRoomIndex, RoomSettings } from "../types/multiplayer";
+import { formatPresetLabel } from "../lib/roomPresets";
+import type { ActiveRoomIndex, PresetId, RoomSettings } from "../types/multiplayer";
 import {
   createRoom,
   joinRoom,
@@ -151,7 +152,7 @@ export function LandingPage() {
                   <div>
                     <div className="active-game-name">{room.hostName}&apos;s game</div>
                     <div className="active-game-meta">
-                      {room.status === "active" ? "In Progress" : "Waiting"} · Standard
+                      {room.status === "active" ? "In Progress" : "Waiting"} · {formatPresetLabel(room.preset as PresetId)}
                     </div>
                   </div>
                   <div className="active-game-meta">

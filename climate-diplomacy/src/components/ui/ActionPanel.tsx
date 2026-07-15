@@ -7,6 +7,7 @@ export function ActionPanel() {
   const {
     gameState,
     isTestScenario,
+    multiplayer,
     dashboardOpen,
     setDashboardOpen,
     buildPanelOpen,
@@ -18,7 +19,12 @@ export function ActionPanel() {
 
   const [expanded, setExpanded] = useState(false);
 
-  const showAdvance = gameState.testingMode;
+  const hostManualAdvance =
+    Boolean(multiplayer?.isHost) &&
+    Boolean(gameState.gameMode?.manualCycleAdvance) &&
+    !gameState.testingMode;
+
+  const showAdvance = gameState.testingMode || hostManualAdvance;
 
   const showBuildButton = canPlayerBuildOnHex(
     selectedHex,
@@ -73,10 +79,12 @@ export function ActionPanel() {
           {showAdvance && (
             <button
               type="button"
-              className="overlay-btn"
+              className="overlay-btn primary"
               onClick={advanceCycle}
             >
-              Advance Cycle ({gameState.cycle})
+              {hostManualAdvance
+                ? `Next Round for All (${gameState.cycle})`
+                : `Advance Cycle (${gameState.cycle})`}
             </button>
           )}
         </div>

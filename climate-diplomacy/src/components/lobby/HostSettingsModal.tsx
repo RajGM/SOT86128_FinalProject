@@ -1,5 +1,6 @@
-import type { RoomSettings } from "../../types/multiplayer";
-import { DEFAULT_ROOM_SETTINGS } from "../../lib/roomPresets";
+import { useState } from "react";
+import type { PresetId, RoomSettings } from "../../types/multiplayer";
+import { getRoomPreset, presetDescription, formatPresetLabel } from "../../lib/roomPresets";
 import "../../styles/lobby.css";
 
 interface HostSettingsModalProps {
@@ -8,23 +9,34 @@ interface HostSettingsModalProps {
   busy?: boolean;
 }
 
-/** Minimal host confirmation — games use the rich test-scenario default world. */
+const PRESET_OPTIONS: PresetId[] = ["easy", "medium", "hard"];
+
 export function HostSettingsModal({ onClose, onCreate, busy }: HostSettingsModalProps) {
+  const [selected, setSelected] = useState<PresetId>("medium");
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel overlay-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">Host Game</div>
+      <div className="modal-panel overlay-panel host-settings-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-title">Host Game — Choose Difficulty</div>
 
-        <p style={{ fontSize: 14, lineHeight: 1.5, margin: "0 0 16px", color: "rgba(255,255,255,0.75)" }}>
-          Starts in a rich mid-game world: existing buildings, trade routes, diplomatic
-          relations, and active summit resolutions. Unassigned countries are played by bots.
+        <p className="host-settings-intro">
+          Pick a mode before creating the lobby. Unassigned countries are played by bots.
         </p>
 
-        <ul style={{ fontSize: 13, margin: "0 0 20px", paddingLeft: 20, color: "rgba(255,255,255,0.6)" }}>
-          <li>5-minute cycles</li>
-          <li>Up to 8 players</li>
-          <li>Random country assignment at start</li>
-        </ul>
+        <div className="preset-grid">
+          {PRESET_OPTIONS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              className={`preset-card ${selected === preset ? "selected" : ""}`}
+              onClick={() => setSelected(preset)}
+              disabled={busy}
+            >
+              <div className="preset-card-title">{formatPresetLabel(preset)}</div>
+              <div className="preset-card-desc">{presetDescription(preset)}</div>
+            </button>
+          ))}
+        </div>
 
         <div className="modal-actions">
           <button type="button" className="overlay-btn" onClick={onClose} disabled={busy}>
@@ -34,9 +46,9 @@ export function HostSettingsModal({ onClose, onCreate, busy }: HostSettingsModal
             type="button"
             className="overlay-btn primary"
             disabled={busy}
-            onClick={() => onCreate(structuredClone(DEFAULT_ROOM_SETTINGS))}
+            onClick={() => onCreate(getRoomPreset(selected))}
           >
-            {busy ? "Creating…" : "Create Game"}
+            {busy ? "Creating…" : `Create ${formatPresetLabel(selected)} Game`}
           </button>
         </div>
       </div>

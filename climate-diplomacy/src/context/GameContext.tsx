@@ -968,6 +968,7 @@ export function GameProvider({
   const setCarbonTax = useCallback((countryId: CountryId, newRate: number) => {
     let changed = false;
     setGameState((prev) => {
+      if (prev.gameMode && !prev.gameMode.enableCarbonTax) return prev;
       const region = prev.regions[countryId];
       const floor = getCarbonTaxFloor(prev, countryId);
       const ceiling = getCarbonTaxCeiling(prev, countryId) ?? 100;

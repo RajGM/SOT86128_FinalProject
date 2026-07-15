@@ -22,6 +22,8 @@ export function MultiplayerCycleController({
 
   useEffect(() => {
     if (!isHost || !cycleTimer || gameState.testingMode) return;
+    if (gameState.gameMode?.manualCycleAdvance) return;
+    if (cycleTimer.durationMs <= 0) return;
 
     const check = () => {
       if (phaseRef.current !== "playing") return;
@@ -38,7 +40,7 @@ export function MultiplayerCycleController({
     check();
     const id = window.setInterval(check, 250);
     return () => window.clearInterval(id);
-  }, [isHost, cycleTimer, advanceCycle, gameState.cycle, gameState.testingMode]);
+  }, [isHost, cycleTimer, advanceCycle, gameState.cycle, gameState.testingMode, gameState.gameMode?.manualCycleAdvance]);
 
   useEffect(() => {
     if (!isHost || phaseRef.current !== "advancing") return;
